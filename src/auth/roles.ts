@@ -1,0 +1,91 @@
+import type { UserRole } from '@/types';
+
+export const ROLE_LABEL: Record<UserRole, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Admin',
+  karyawan: 'Karyawan',
+};
+
+export const ROLE_OPTIONS: { role: UserRole; description: string }[] = [
+  { role: 'super_admin', description: 'Akses penuh ke seluruh modul termasuk manajemen user' },
+  { role: 'admin', description: 'Mengelola operasional gudang, stok, dan laporan' },
+  { role: 'karyawan', description: 'Menjalankan tugas operasional harian gudang' },
+];
+
+export interface NavLink {
+  label: string;
+  href: string;
+  roles: UserRole[];
+}
+
+export interface NavGroup {
+  title?: string;
+  links: NavLink[];
+}
+
+const ALL_ROLES: UserRole[] = ['super_admin', 'admin', 'karyawan'];
+const STAFF_ROLES: UserRole[] = ['super_admin', 'admin'];
+
+/**
+ * Struktur menu sidebar mengikuti desain asli StokRSD WMS.
+ * "Manajemen User" dan "Task Manajemen" dibatasi untuk Super Admin & Admin
+ * — Karyawan tidak diberi akses administratif ke user maupun penugasan lintas tim.
+ */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    title: 'Menu Utama',
+    links: [
+      { label: 'Dashboard', href: '/dashboard', roles: ALL_ROLES },
+      { label: 'Pickup & Dropoff', href: '/pickup-dropoff', roles: ALL_ROLES },
+      { label: 'Purchase Order', href: '/purchase-order', roles: STAFF_ROLES },
+      { label: 'WMS', href: '/warehouse', roles: ALL_ROLES },
+      { label: 'Supplier', href: '/supplier', roles: STAFF_ROLES },
+      { label: 'Inventaris', href: '/inventory', roles: ALL_ROLES },
+    ],
+  },
+  {
+    title: 'Pengelolaan',
+    links: [
+      { label: 'Barang Masuk', href: '/goods-in', roles: ALL_ROLES },
+      { label: 'Barang Keluar', href: '/goods-out', roles: ALL_ROLES },
+      { label: 'Kelola Barang', href: '/items', roles: ALL_ROLES },
+    ],
+  },
+  {
+    links: [
+      { label: 'COD Monitoring', href: '/cod-monitoring', roles: ALL_ROLES },
+      { label: 'Monitoring Pengiriman', href: '/delivery-monitoring', roles: ALL_ROLES },
+      { label: 'Analisa Data', href: '/data-analysis', roles: STAFF_ROLES },
+    ],
+  },
+  {
+    title: 'Manajemen',
+    links: [
+      { label: 'Manajemen User', href: '/user-management', roles: ['super_admin'] },
+      { label: 'Task Manajemen', href: '/tasks', roles: ['super_admin'] },
+      { label: 'Manajemen Gudang', href: '/warehouse-management', roles: STAFF_ROLES },
+      { label: 'Manajemen Inventaris', href: '/inventory-management', roles: STAFF_ROLES },
+    ],
+  },
+  {
+    title: 'Laporan',
+    links: [
+      { label: 'Laporan Inventaris', href: '/reports/inventory', roles: STAFF_ROLES },
+      { label: 'Laporan Barang Masuk', href: '/reports/goods-in', roles: STAFF_ROLES },
+      { label: 'Laporan Barang Keluar', href: '/reports/goods-out', roles: STAFF_ROLES },
+      { label: 'Laporan Barang Retur', href: '/reports/returns', roles: STAFF_ROLES },
+      { label: 'Laporan Gudang', href: '/reports/warehouse', roles: STAFF_ROLES },
+    ],
+  },
+];
+
+export function canAccess(role: UserRole, allowedRoles: UserRole[]): boolean {
+  return allowedRoles.includes(role);
+}
+
+export function getNavGroupsForRole(role: UserRole): NavGroup[] {
+  return NAV_GROUPS.map((group) => ({
+    ...group,
+    links: group.links.filter((link) => canAccess(role, link.roles)),
+  })).filter((group) => group.links.length > 0);
+}

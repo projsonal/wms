@@ -1,0 +1,221 @@
+@import 'tailwindcss';
+
+/*
+ * Tailwind v4 memakai pendekatan "CSS-first": token di bawah ini
+ * (di dalam @theme) otomatis menghasilkan utility class, mis.
+ * --color-accent -> bg-accent, text-accent, border-accent, dst.
+ * Tidak perlu tailwind.config.js terpisah.
+ */
+@theme {
+  --color-bg: #fbeeea;
+  --color-sidebarFrom: #3b140a;
+  --color-sidebarTo: #5c2211;
+  --color-accent: #b3471f;
+  --color-accentDark: #8f3717;
+  --color-accentSoft: #f3d9ce;
+  --color-surface: #ffffff;
+  --color-surfaceAlt: #fdf1ec;
+  --color-borderSoft: #f0dad2;
+  --color-text: #2b211d;
+  --color-textMuted: #8a7b74;
+  --color-successBg: #e4f3e1;
+  --color-successText: #2f8132;
+  --color-warningBg: #fcebd3;
+  --color-warningText: #c9791e;
+  --color-dangerBg: #fbe1e1;
+  --color-dangerText: #c63c3c;
+  --color-infoBg: #e4e9fb;
+  --color-infoText: #3454c7;
+  --color-neutralBg: #eee7e3;
+  --color-neutralText: #6b5d56;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+
+  --shadow-card: 0 8px 24px rgba(59, 20, 10, 0.06);
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: var(--color-accentSoft);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ============================================================
+ * Animasi bertema pergudangan & inventaris — dipakai bersama
+ * lewat utility class di bawah, dikombinasikan dengan Framer
+ * Motion untuk animasi berbasis komponen.
+ * ============================================================ */
+
+@keyframes wms-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(3deg);
+  }
+}
+
+@keyframes wms-float-slow {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(-2deg);
+  }
+}
+
+@keyframes wms-drift {
+  0% {
+    transform: translateX(-6%);
+  }
+  50% {
+    transform: translateX(6%);
+  }
+  100% {
+    transform: translateX(-6%);
+  }
+}
+
+@keyframes wms-conveyor {
+  0% {
+    background-position-x: 0;
+  }
+  100% {
+    background-position-x: -80px;
+  }
+}
+
+@keyframes wms-scan {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(2200%);
+    opacity: 0;
+  }
+}
+
+@keyframes wms-glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(179, 71, 31, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(179, 71, 31, 0);
+  }
+}
+
+@keyframes wms-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes wms-forklift-wheel {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-wms-float {
+  animation: wms-float 6s ease-in-out infinite;
+}
+
+.animate-wms-float-slow {
+  animation: wms-float-slow 8s ease-in-out infinite;
+}
+
+.animate-wms-float-delay {
+  animation: wms-float 7s ease-in-out infinite;
+  animation-delay: 1.2s;
+}
+
+.animate-wms-drift {
+  animation: wms-drift 5s ease-in-out infinite;
+}
+
+.animate-wms-conveyor {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.16) 0 10px,
+    transparent 10px 20px
+  );
+  animation: wms-conveyor 1.4s linear infinite;
+}
+
+.animate-wms-scan {
+  animation: wms-scan 2.4s ease-in-out infinite;
+}
+
+.animate-wms-glow-pulse {
+  animation: wms-glow-pulse 2.2s ease-out infinite;
+}
+
+.animate-wms-shimmer {
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.55) 45%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: wms-shimmer 2.6s ease-in-out infinite;
+}
+
+.animate-wms-wheel {
+  animation: wms-forklift-wheel 0.7s linear infinite;
+}
