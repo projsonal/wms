@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, X, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Menu, X, ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
 import { getNavGroupsForRole, ROLE_LABEL } from '@/auth/roles';
 import { useAuth } from '@/auth/AuthContext';
 import { useSidebarState } from '@/component/layout/SidebarContext';
@@ -40,7 +40,7 @@ function SidebarBody({
           transition={{ type: 'spring', stiffness: 200, damping: 20 }}
         >
           <motion.div whileHover={{ rotate: [0, -6, 6, 0] }} transition={{ duration: 0.5 }}>
-            <Image src="/assets/favicon-64.png" alt="" width={32} height={32} className="shrink-0 rounded-lg" />
+            <Image src="/assets/icon_wms_square.png" alt="" width={32} height={32} className="shrink-0 rounded-lg object-cover" />
           </motion.div>
           {collapsed ? null : <h1 className="truncate text-xl font-bold">{ROLE_LABEL[role]}</h1>}
         </motion.div>
@@ -104,6 +104,27 @@ function SidebarBody({
             </div>
           ))}
         </nav>
+        {/* Setting — tersedia untuk SEMUA role. Diletakkan sebagai item
+            terakhir daftar nav (di atas kartu profil/Logout), persis
+            seperti posisinya di mockup: baris penuh dengan aksen border
+            kiri saat aktif, terpisah sedikit dari grup Laporan di atasnya. */}
+        <div className="mt-4 border-t border-white/10 pt-3">
+          <Link
+            href="/home/settings"
+            onClick={onNavigate}
+            title={collapsed ? 'Settings' : undefined}
+            className={clsx(
+              'relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors',
+              collapsed && 'justify-center px-0 py-2.5',
+              pathname === '/home/settings' || pathname.startsWith('/home/settings/')
+                ? 'bg-accent text-white'
+                : 'text-white/80 hover:bg-white/10 hover:text-white',
+            )}
+          >
+            <Settings className="h-4 w-4 shrink-0" />
+            {collapsed ? null : <span className="truncate">Settings</span>}
+          </Link>
+        </div>
       </div>
 
       <motion.div
@@ -159,7 +180,7 @@ export function Sidebar(): React.JSX.Element {
       <motion.aside
         animate={{ width: isCollapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
         transition={{ type: 'spring', stiffness: 260, damping: 32 }}
-        className="sticky top-0 hidden h-screen shrink-0 bg-gradient-to-b from-sidebarFrom to-sidebarTo text-white lg:block"
+        className="sticky top-0 hidden h-screen shrink-0 bg-gradient-to-b from-sidebarFrom to-sidebarTo text-white lg:block print:hidden"
       >
         <span className="pointer-events-none absolute -right-6 top-24 h-16 w-16 rotate-12 rounded-lg border border-white/10 animate-wms-float-slow" />
         <span className="pointer-events-none absolute -left-4 bottom-40 h-10 w-10 -rotate-6 rounded-md border border-white/10 animate-wms-float" />

@@ -17,7 +17,7 @@ interface HeaderProps {
  */
 export function Header({ title, breadcrumb, action }: HeaderProps): React.JSX.Element {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-borderSoft bg-surface px-4 py-4 sm:px-6 lg:px-8 lg:py-5">
+    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-borderSoft bg-surface px-4 py-4 sm:px-6 lg:px-8 lg:py-5 print:hidden">
       <div className="flex items-center gap-3">
         <SidebarMobileToggle />
         <motion.div

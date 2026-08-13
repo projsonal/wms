@@ -4,21 +4,12 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 
 interface AccountLockoutBannerProps {
-  /** Pesan mentah dari server, mis. "akun anda dikunci sementara karena
-   * terlalu banyak percobaan gagal, coba lagi dalam setelah 5 menit". */
-  message: string;
-  /** Dipanggil sekali saat hitung mundur mencapai nol, supaya form login
-   * bisa dibuka kembali otomatis. */
-  onExpire?: () => void;
+  readonly message: string;
+  readonly onExpire?: () => void;
 }
 
 const UNIT_TO_SECONDS: Record<string, number> = { detik: 1, menit: 60, jam: 3600 };
 
-/**
- * Cari angka + satuan waktu (menit/detik/jam) di pesan server, dan ubah ke
- * detik. Diparsing lewat pemecahan kata (bukan satu regex kompleks) supaya
- * tidak rentan backtracking super-linear (aturan sonarjs/slow-regex).
- */
 function parseLockoutSeconds(message: string): number | null {
   const words = message.toLowerCase().split(/[^a-z0-9]+/);
   for (let i = 0; i < words.length; i += 1) {
@@ -39,17 +30,11 @@ function formatDuration(totalSeconds: number): string {
   return `${seconds}s`;
 }
 
-/**
- * Deteksi pesan lockout akun dari backend (mis. "dikunci sementara ...
- * coba lagi dalam N menit") dan tampilkan sebagai hitung mundur hidup
- * dengan animasi jam pasir, bukan cuma teks statis.
- */
-export function AccountLockoutBanner({ message, onExpire }: AccountLockoutBannerProps): React.JSX.Element {
+export function AccountLockoutBanner({ message, onExpire }: Readonly<AccountLockoutBannerProps>): React.JSX.Element {
   const initialSeconds = parseLockoutSeconds(message) ?? 60;
   const [secondsLeft, setSecondsLeft] = useState(initialSeconds);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset saat pesan lockout baru datang (prop berubah)
     setSecondsLeft(parseLockoutSeconds(message) ?? 60);
   }, [message]);
 
@@ -82,7 +67,7 @@ export function AccountLockoutBanner({ message, onExpire }: AccountLockoutBanner
         </motion.span>
         <div>
           <p className="text-sm font-semibold text-dangerText">Akun terkunci sementara</p>
-          <p className="text-xs text-textMuted">Terlalu banyak percobaan masuk gagal.</p>
+          <p className="text-xs text-textMuted">Terlalu banyak percobaan masuk.</p>
         </div>
       </div>
 
@@ -107,7 +92,7 @@ export function AccountLockoutBanner({ message, onExpire }: AccountLockoutBanner
       </div>
 
       <p className="text-center text-xs text-textMuted">
-        Kamu bisa coba masuk lagi otomatis setelah waktu ini habis.
+        Kamu bisa coba masuk lagi otomatis setelah waktunya habis.
       </p>
     </motion.div>
   );

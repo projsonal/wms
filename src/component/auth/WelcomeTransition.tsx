@@ -1,13 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import {
-  BarcodeIcon,
-  BoxIcon,
-  CheckBurstIcon,
-  ForkliftIcon,
-} from '@/component/ui/WarehouseIcons';
+import Image from 'next/image';
 
 interface WelcomeTransitionProps {
   name: string;
@@ -15,107 +10,167 @@ interface WelcomeTransitionProps {
   onDone: () => void;
 }
 
+const PARTICLE_COUNT = 14;
+
 /**
- * Layar transisi penuh setelah login berhasil: forklift "menjemput" sesi,
- * lalu memindai barcode, lalu menampilkan sapaan "Selamat datang, {name}"
- * sebelum halaman dashboard terlihat. Dipanggil sekali per login lewat
- * flag di sessionStorage (lihat `login/page.tsx` & `dashboard/page.tsx`).
+ * Layar transisi penuh setelah login berhasil — dirancang MEWAH & ELEGAN
+ * mengikuti identitas logo WMS-RSD (hitam pekat + emas), bukan lagi tema
+ * gudang bernuansa oranye/kotak-kardus seperti versi sebelumnya: latar
+ * hitam pekat dengan vignette emas lembut, partikel emas melayang naik
+ * perlahan, garis emas tipis yang "menggambar" diri sendiri di bawah logo,
+ * dan tipografi berjarak-huruf lebar khas identitas brand premium.
+ * Dipanggil sekali per login lewat flag di sessionStorage (lihat
+ * `login/page.tsx` & `dashboard/page.tsx`).
  */
 export function WelcomeTransition({ name, roleLabel, onDone }: WelcomeTransitionProps): React.JSX.Element {
-  const [phase, setPhase] = useState<'scan' | 'greet'>('scan');
+  const [phase, setPhase] = useState<'reveal' | 'greet'>('reveal');
 
   useEffect(() => {
-    const toGreet = setTimeout(() => setPhase('greet'), 1500);
-    const finish = setTimeout(() => onDone(), 3400);
+    const toGreet = setTimeout(() => setPhase('greet'), 1700);
+    const finish = setTimeout(() => onDone(), 3800);
     return () => {
       clearTimeout(toGreet);
       clearTimeout(finish);
     };
   }, [onDone]);
 
+  const particles = useMemo(
+    () =>
+      Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
+        id: i,
+        left: 8 + ((i * 6.5) % 84),
+        delay: (i % 7) * 0.55,
+        duration: 3.4 + (i % 5) * 0.4,
+        size: 2 + (i % 3),
+      })),
+    [],
+  );
+
   return (
     <motion.div
-      className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-gradient-to-br from-sidebarFrom via-accentDark to-sidebarTo text-white"
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-[#050505] text-white"
       initial={{ opacity: 1 }}
-      exit={{ opacity: 0, scale: 1.04 }}
-      transition={{ duration: 0.5, ease: 'easeInOut' }}
+      exit={{ opacity: 0, scale: 1.03 }}
+      transition={{ duration: 0.6, ease: 'easeInOut' }}
     >
-      {/* Dekorasi kotak melayang di latar */}
-      <BoxIcon className="pointer-events-none absolute left-[8%] top-[16%] h-16 w-16 text-white/15 animate-wms-float" />
-      <BoxIcon className="pointer-events-none absolute right-[10%] top-[20%] h-10 w-10 text-white/10 animate-wms-float-delay" />
-      <BoxIcon className="pointer-events-none absolute left-[14%] bottom-[20%] h-12 w-12 text-white/10 animate-wms-float-slow" />
-      <BoxIcon className="pointer-events-none absolute right-[16%] bottom-[26%] h-20 w-20 text-white/10 animate-wms-float" />
+      {/* Vignette emas lembut di belakang logo */}
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(212,160,74,0.16)_0%,rgba(212,160,74,0)_70%)]" />
+      {/* Vignette gelap di tepi layar supaya fokus tetap ke tengah */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(0,0,0,0.75)_100%)]" />
 
-      {/* Sabuk konveyor di dasar layar */}
-      <div className="absolute inset-x-0 bottom-0 h-14 overflow-hidden bg-black/25">
-        <div className="h-full w-full animate-wms-conveyor bg-[length:80px_100%] opacity-70" />
-      </div>
+      {/* Partikel emas melayang naik perlahan */}
+      {particles.map((p) => (
+        <span
+          key={p.id}
+          className="pointer-events-none absolute bottom-0 rounded-full bg-[#d4a04a] animate-wms-particle-rise"
+          style={{
+            left: `${p.left}%`,
+            width: p.size,
+            height: p.size,
+            animationDelay: `${p.delay}s`,
+            animationDuration: `${p.duration}s`,
+            boxShadow: '0 0 6px rgba(212,160,74,0.8)',
+          }}
+        />
+      ))}
 
-      <div className="relative z-10 flex flex-col items-center gap-6 px-6 text-center">
-        {phase === 'scan' ? (
+      <div className="relative z-10 flex flex-col items-center gap-7 px-6 text-center">
+        {phase === 'reveal' ? (
           <motion.div
-            key="scan"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -16 }}
-            transition={{ duration: 0.4 }}
-            className="flex flex-col items-center gap-5"
+            key="reveal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.3 } }}
+            className="flex flex-col items-center gap-6"
           >
             <motion.div
-              animate={{ x: [0, 16, 0] }}
-              transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+              initial={{ opacity: 0, scale: 0.88, filter: 'blur(6px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }}
+              className="relative overflow-hidden"
             >
-              <ForkliftIcon className="h-16 w-28 text-white drop-shadow-lg" />
+              <Image
+                src="/assets/logo_wms.jpg"
+                alt="Logo WMS-RSD"
+                width={220}
+                height={124}
+                priority
+                className="block h-auto w-52 select-none sm:w-64"
+              />
+              {/* Sapuan cahaya emas melintasi logo, sekali saja (bukan loop terus-terusan — lebih elegan) */}
+              <motion.div
+                className="pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                initial={{ x: '-120%', skewX: -12 }}
+                animate={{ x: '220%' }}
+                transition={{ duration: 1.3, delay: 0.5, ease: 'easeInOut' }}
+              />
             </motion.div>
-            <div className="relative overflow-hidden rounded-xl border border-white/25 bg-white/10 px-6 py-4 backdrop-blur-sm">
-              <BarcodeIcon className="h-8 w-32 text-white/85" />
-              <motion.span className="absolute inset-x-0 top-0 h-0.5 bg-accentSoft animate-wms-scan" />
-            </div>
+
+            {/* Garis emas tipis yang "menggambar diri sendiri" */}
+            <motion.div
+              className="h-px bg-gradient-to-r from-transparent via-[#d4a04a] to-transparent"
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 220, opacity: 1 }}
+              transition={{ duration: 0.9, delay: 0.7, ease: [0.16, 1, 0.3, 1] }}
+            />
+
             <motion.p
-              className="text-sm text-white/70"
-              animate={{ opacity: [0.5, 1, 0.5] }}
-              transition={{ duration: 1.6, repeat: Infinity }}
+              className="text-[11px] font-medium uppercase tracking-[0.35em] text-white/50"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1, duration: 0.6 }}
             >
-              Memverifikasi sesi &amp; menyiapkan gudang kamu...
+              Menyiapkan Gudang Anda
             </motion.p>
           </motion.div>
         ) : (
           <motion.div
             key="greet"
-            initial={{ opacity: 0, scale: 0.85 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ type: 'spring', stiffness: 200, damping: 16 }}
-            className="flex flex-col items-center gap-3"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+            className="flex flex-col items-center gap-4"
           >
             <motion.div
-              initial={{ scale: 0, rotate: -30 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 14, delay: 0.05 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
             >
-              <CheckBurstIcon className="h-16 w-16 text-white" />
+              <Image
+                src="/assets/logo_wms.jpg"
+                alt="Logo WMS-RSD"
+                width={132}
+                height={74}
+                className="mx-auto h-auto w-32 select-none opacity-90 sm:w-36"
+              />
             </motion.div>
             <motion.h1
-              className="text-2xl font-bold sm:text-4xl"
-              initial={{ opacity: 0, y: 10 }}
+              className="text-xl font-semibold tracking-wide text-white sm:text-3xl"
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
+              transition={{ delay: 0.15, duration: 0.6 }}
             >
-              Selamat datang, {name}! 👋
+              Selamat Datang, {name}
             </motion.h1>
             <motion.p
-              className="text-sm text-white/80"
+              className="text-xs uppercase tracking-[0.3em] text-[#d4a04a]/80"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
+              transition={{ delay: 0.35, duration: 0.6 }}
             >
-              Masuk sebagai {roleLabel} • Menyiapkan dashboard gudang kamu...
+              {roleLabel}
             </motion.p>
-            <motion.div className="mt-2 h-1.5 w-56 overflow-hidden rounded-full bg-white/20">
+            <motion.div
+              className="mt-3 h-px w-56 overflow-hidden bg-white/10"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
+            >
               <motion.div
-                className="h-full rounded-full bg-white"
+                className="h-full bg-gradient-to-r from-[#d4a04a] via-[#f3d9ce] to-[#d4a04a]"
                 initial={{ width: '0%' }}
                 animate={{ width: '100%' }}
-                transition={{ duration: 1.7, ease: 'easeInOut', delay: 0.1 }}
+                transition={{ duration: 1.9, ease: 'easeInOut', delay: 0.2 }}
               />
             </motion.div>
           </motion.div>

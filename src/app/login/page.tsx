@@ -1,29 +1,26 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AccountLockoutBanner } from '@/component/auth/AccountLockoutBanner';
 import { AuthShell } from '@/component/auth/AuthShell';
-import { CaptchaGate, useRunWithBotGate } from '@/component/auth/CaptchaGate';
+import { AuthTabs } from '@/component/auth/AuthTabs';
 import { ForgotPasswordStep } from '@/component/auth/ForgotPasswordStep';
 import { LoginStep } from '@/component/auth/LoginStep';
-import { TwoFactorSetupStep } from '@/component/auth/TwoFactorSetupStep';
 import { OtpVerifyStep } from '@/component/auth/OtpVerifyStep';
 import { VerifyFailedStep, VerifySuccessStep } from '@/component/auth/VerifyResultStep';
 import { Button } from '@/component/ui/Button';
 import { authApi } from '@/lib/api/auth';
-import { BotCheckRequiredError, HttpError } from '@/lib/api/client';
-import { buildDemoUser, DEMO_MODE_ENABLED, setDemoUser } from '@/auth/demo';
+import { HttpError } from '@/lib/api/client';
 import { useAuth } from '@/auth/AuthContext';
-import type { LoginPayload, OtpMethod, SessionInfo } from '@/types';
+import { useEnterToSubmit } from '@/lib/hooks/use-enter-to-submit';
+import type { LoginPayload, SessionInfo } from '@/types';
 
-type Step = 'login' | 'setup2fa' | 'verifyOtp' | 'success' | 'failed' | 'forgotPassword';
+type Step = 'login' | 'verifyOtp' | 'success' | 'failed' | 'forgotPassword';
 
 const STEP_INDEX: Record<Step, number> = {
   login: 1,
-  setup2fa: 2,
   verifyOtp: 2,
   success: 3,
   failed: 3,
@@ -35,27 +32,24 @@ const STEP_INDEX: Record<Step, number> = {
 const LOCKOUT_THRESHOLD = 3;
 const LOCKOUT_SECONDS = 10;
 
+/**
+ * Aplikasi internal perusahaan: TIDAK ada lagi gerbang captcha penuh-layar
+ * sebelum form ini tampil (dulu <CaptchaGate>), dan 2FA TIDAK lagi
+ * dipaksakan setelah login — hanya user yang SUDAH mengaktifkan sendiri
+ * 2FA lewat Settings -> Keamanan yang akan diminta kode OTP di sini.
+ */
 function LoginWizard(): React.JSX.Element {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { refreshUser } = useAuth();
-  const runWithBotGate = useRunWithBotGate();
 
   const [step, setStep] = useState<Step>('login');
-  const [previousStep, setPreviousStep] = useState<'setup2fa' | 'verifyOtp'>('verifyOtp');
   const [credentials, setCredentials] = useState<LoginPayload>({ username: '', password: '' });
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [pendingToken, setPendingToken] = useState('');
   const [otp, setOtp] = useState('');
-
-  // Setup 2FA (pengguna baru, belum pernah aktifkan 2FA).
-  const [totpSecret, setTotpSecret] = useState('');
-
-  // Verifikasi OTP (pengguna lama, 2FA sudah aktif).
-  const [otpMethod, setOtpMethod] = useState<OtpMethod>('totp');
-  const [otpToken, setOtpToken] = useState('');
-  const [isRequestingWhatsapp, setIsRequestingWhatsapp] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
 
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | undefined>(undefined);
@@ -92,36 +86,25 @@ function LoginWizard(): React.JSX.Element {
     }
     setIsSubmitting(true);
     try {
-      const res = await runWithBotGate(() => authApi.login(credentials));
-      setPendingToken(res.pendingToken ?? '');
+      const res = await authApi.login(credentials);
       setFailedAttempts(0);
 
-      if (res.requireSetup2fa) {
-        const setup = await runWithBotGate(() => authApi.setupTwoFactor(res.pendingToken ?? ''));
-        setTotpSecret(setup.secret);
-        setPreviousStep('setup2fa');
-        setStep('setup2fa');
-        return;
-      }
       if (res.requireOtp) {
-        setOtpMethod('totp');
-        setPreviousStep('verifyOtp');
+        setPendingToken(res.pendingToken ?? '');
         setStep('verifyOtp');
         return;
       }
-      setFormError('Respons server tidak dikenali, silakan coba lagi.');
+      // Tidak ada 2FA aktif -> authApi.login sudah menyimpan sesi
+      // (access/refresh token) lewat persistSessionIfPresent, langsung
+      // dianggap berhasil masuk tanpa langkah tambahan apa pun.
+      setSessionInfo(res.session);
+      setStep('success');
     } catch (error) {
-      if (error instanceof BotCheckRequiredError) {
-        // CaptchaGate akan menampilkan tantangan captcha-nya sendiri —
-        // bukan kegagalan kredensial, jadi tidak dihitung sebagai percobaan gagal.
-        return;
-      }
-
       const message = error instanceof HttpError ? error.message : 'Username atau password salah.';
 
-      // Backend gostock membalas dengan pesan lockout akun (bukan cuma
-      // captcha) saat rate-limit sisi server terlampaui — tangkap polanya
-      // di sini supaya ditampilkan sebagai hitung mundur, bukan teks datar.
+      // Backend gostock membalas dengan pesan lockout akun saat rate-limit
+      // sisi server terlampaui — tangkap polanya di sini supaya
+      // ditampilkan sebagai hitung mundur, bukan teks datar.
       if (/dikunci|terkunci/i.test(message)) {
         setAccountLockoutMessage(message);
         return;
@@ -141,58 +124,21 @@ function LoginWizard(): React.JSX.Element {
     }
   }
 
-  async function handleConfirmSetup2FA(): Promise<void> {
-    setIsSubmitting(true);
-    try {
-      const res = await runWithBotGate(() =>
-        authApi.confirmTwoFactorSetup({ pendingToken, secret: totpSecret, otpCode: otp }),
-      );
-      setSessionInfo(res.session);
-      setStep('success');
-    } catch {
-      setStep('failed');
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
   async function handleVerifyOtp(): Promise<void> {
     setIsSubmitting(true);
     setOtpError(null);
     try {
-      const res = await runWithBotGate(() =>
-        authApi.verifyOtp({
-          pendingToken,
-          otpCode: otp,
-          method: otpMethod,
-          otpToken: otpMethod === 'whatsapp' ? otpToken : undefined,
-        }),
-      );
+      const res = await authApi.verifyOtp({
+        pendingToken,
+        otpCode: otp,
+      });
       setSessionInfo(res.session);
       setStep('success');
-    } catch {
+    } catch (error) {
+      setOtpError(error instanceof HttpError ? error.message : 'Kode OTP salah, silakan coba lagi.');
       setStep('failed');
     } finally {
       setIsSubmitting(false);
-    }
-  }
-
-  async function handleRequestWhatsapp(): Promise<void> {
-    setIsRequestingWhatsapp(true);
-    setOtpError(null);
-    try {
-      const res = await runWithBotGate(() => authApi.requestOtp(pendingToken, 'whatsapp'));
-      setOtpToken(res.otpToken);
-      setOtpMethod('whatsapp');
-      setOtp('');
-    } catch (error) {
-      setOtpError(
-        error instanceof HttpError
-          ? error.message
-          : 'Gagal mengirim kode WhatsApp, coba lagi.',
-      );
-    } finally {
-      setIsRequestingWhatsapp(false);
     }
   }
 
@@ -201,32 +147,26 @@ function LoginWizard(): React.JSX.Element {
       window.sessionStorage.setItem('wms_show_welcome', '1');
     }
     await refreshUser();
-    router.push('/dashboard');
+    const redirectTarget = searchParams.get('redirect');
+    const isSafeRelativePath = redirectTarget?.startsWith('/') && !redirectTarget.startsWith('//');
+    router.push(isSafeRelativePath && redirectTarget ? redirectTarget : '/home/dashboard');
   }
 
-  function enterPreviewMode(): void {
-    setDemoUser(buildDemoUser('super_admin'));
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem('wms_show_welcome', '1');
-    }
-    router.push('/dashboard');
-  }
-
-  async function refreshTwoFactorSetup(): Promise<void> {
-    try {
-      const setup = await runWithBotGate(() => authApi.setupTwoFactor(pendingToken));
-      setTotpSecret(setup.secret);
-      setOtp('');
-    } catch (error) {
-      setFormError(error instanceof HttpError ? error.message : 'Gagal memuat ulang kode QR.');
+  function handleEnterSubmit(): void {
+    if (step === 'login' && lockoutSeconds === 0 && !accountLockoutMessage) {
+      void handleCredentialsSubmit();
+    } else if (step === 'verifyOtp' && otp.length >= 6) {
+      void handleVerifyOtp();
     }
   }
+  const handleAuthShellKeyDown = useEnterToSubmit(handleEnterSubmit, { disabled: isSubmitting });
 
   function renderStep(): React.JSX.Element {
     switch (step) {
       case 'login':
         return (
           <div className="flex flex-col gap-3">
+            <AuthTabs active="login" />
             <LoginStep values={credentials} onChange={setCredentials} />
             {formError ? <p className="text-xs text-dangerText">{formError}</p> : null}
             {accountLockoutMessage ? (
@@ -290,19 +230,6 @@ function LoginWizard(): React.JSX.Element {
             }}
           />
         );
-      case 'setup2fa':
-        return (
-          <TwoFactorSetupStep
-            secret={totpSecret}
-            accountLabel={credentials.username}
-            otp={otp}
-            onOtpChange={setOtp}
-            onCancel={() => setStep('login')}
-            onActivate={handleConfirmSetup2FA}
-            isSubmitting={isSubmitting}
-            onExpire={refreshTwoFactorSetup}
-          />
-        );
       case 'verifyOtp':
         return (
           <OtpVerifyStep
@@ -310,9 +237,6 @@ function LoginWizard(): React.JSX.Element {
             onOtpChange={setOtp}
             onVerify={handleVerifyOtp}
             isSubmitting={isSubmitting}
-            method={otpMethod}
-            isRequestingWhatsapp={isRequestingWhatsapp}
-            onRequestWhatsapp={handleRequestWhatsapp}
             errorMessage={otpError}
           />
         );
@@ -323,7 +247,7 @@ function LoginWizard(): React.JSX.Element {
           <VerifyFailedStep
             onRetry={() => {
               setOtp('');
-              setStep(previousStep);
+              setStep('verifyOtp');
             }}
             onBack={() => {
               setOtp('');
@@ -350,28 +274,21 @@ function LoginWizard(): React.JSX.Element {
   function renderFooter(): React.JSX.Element | null {
     if (step === 'login') {
       return (
-        <>
-          <p className="mb-3 text-center text-xs text-white/80">Belum punya akun?</p>
-          <Link href="/register">
-            <Button variant="secondary" className="mb-3 w-full !border-white/40 !bg-transparent !text-white">
-              Daftar Akun Baru
-            </Button>
-          </Link>
-          <Button
-            className="w-full !bg-white !text-accentDark"
-            onClick={handleCredentialsSubmit}
-            disabled={isSubmitting || lockoutSeconds > 0 || Boolean(accountLockoutMessage)}
-          >
-            {loginButtonLabel()}
-          </Button>
-        </>
+        <Button
+          className="w-full !bg-white !text-accentDark"
+          onClick={handleCredentialsSubmit}
+          disabled={lockoutSeconds > 0 || Boolean(accountLockoutMessage)}
+          loading={isSubmitting && lockoutSeconds === 0 && !accountLockoutMessage}
+        >
+          {loginButtonLabel()}
+        </Button>
       );
     }
     return null;
   }
 
   return (
-    <AuthShell step={STEP_INDEX[step]} totalSteps={3} footer={renderFooter()}>
+    <AuthShell step={STEP_INDEX[step]} totalSteps={3} footer={renderFooter()} onKeyDown={handleAuthShellKeyDown}>
       <AnimatePresence mode="wait">
         <motion.div
           key={step}
@@ -383,27 +300,14 @@ function LoginWizard(): React.JSX.Element {
           {renderStep()}
         </motion.div>
       </AnimatePresence>
-      {step === 'login' && DEMO_MODE_ENABLED ? (
-        <motion.button
-          type="button"
-          onClick={enterPreviewMode}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          whileHover={{ scale: 1.02 }}
-          className="mt-4 w-full text-center text-xs text-textMuted underline"
-        >
-          Backend belum terhubung? Lanjutkan dalam mode pratinjau
-        </motion.button>
-      ) : null}
     </AuthShell>
   );
 }
 
 export default function LoginPage(): React.JSX.Element {
   return (
-    <CaptchaGate>
+    <Suspense fallback={null}>
       <LoginWizard />
-    </CaptchaGate>
+    </Suspense>
   );
 }

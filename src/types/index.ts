@@ -1,5 +1,5 @@
 /**
- * Kumpulan tipe domain untuk aplikasi StokRSD WMS.
+ * Kumpulan tipe domain untuk aplikasi WMS-RSD.
  * Struktur mengikuti kontrak REST API backend github.com/projsonal/gostock
  * (lihat internal/controller/auth/struct.go pada repo backend untuk acuan asli).
  */
@@ -12,7 +12,7 @@ export interface ApiEnvelope<T> {
   message?: string;
   data?: T;
   meta?: unknown;
-  errors?: FieldError[] | unknown;
+  errors?: FieldError[] | Record<string, unknown>;
 }
 
 export interface FieldError {
@@ -38,14 +38,17 @@ export interface LoginPayload {
 
 export interface RegisterPayload {
   username: string;
-  email: string;
   password: string;
   passwordConfirmation: string;
   fullName: string;
   phoneNumber?: string;
   roleName?: UserRole;
-  captchaToken: string;
-  captchaAnswer: string;
+  /** Opsional — aplikasi internal, captcha tidak lagi ditampilkan di UI
+   * (lihat AuthTabs/register/page.tsx). Field dipertahankan di tipe ini
+   * (bukan dihapus total) supaya backend tetap bisa memverifikasinya
+   * kalau suatu saat diaktifkan lagi tanpa breaking change kontrak API. */
+  captchaToken?: string;
+  captchaAnswer?: string;
 }
 
 export interface SessionInfo {
@@ -58,6 +61,8 @@ export interface SessionInfo {
   ipAddress: string;
   location: string;
   createdAt?: string;
+  /** true kalau ini sesi yang sedang dipakai browser ini sendiri. */
+  isCurrent?: boolean;
 }
 
 export interface UserSummary {
@@ -70,6 +75,7 @@ export interface UserSummary {
 
 /** Respons bersama untuk /auth/login, /register, /2fa/confirm, /verify-otp, /refresh. */
 export interface AuthFlowResponse {
+  requirePhoneVerification?: boolean;
   requireSetup2fa: boolean;
   requireOtp: boolean;
   pendingToken?: string;
@@ -86,42 +92,10 @@ export interface Setup2FAResponse {
   qrCodePngBase64: string;
 }
 
-export type OtpMethod = 'totp' | 'whatsapp';
-
-export interface RequestOtpResponse {
-  otpToken: string;
-  expiresInSeconds: number;
-}
-
-/** Metode pengiriman kode reset password. */
-export type PasswordResetMethod = 'whatsapp' | 'sms';
-
-export interface RequestPasswordResetPayload {
-  /** Username atau email akun yang lupa passwordnya. */
-  identifier: string;
-  method: PasswordResetMethod;
-}
-
-export interface RequestPasswordResetResponse {
-  /** Token sesi reset — dibawa terus sampai password baru berhasil disimpan. */
-  resetToken: string;
-  expiresInSeconds: number;
-}
-
-export interface VerifyPasswordResetOtpPayload {
-  resetToken: string;
-  otpCode: string;
-}
-
-export interface ResetPasswordPayload {
-  resetToken: string;
-  newPassword: string;
-  newPasswordConfirmation: string;
-}
-
 /** Tantangan CAPTCHA gambar self-hosted (pkg/captcha). Dipakai untuk /register
  * maupun gerbang anti-bot /security/*. */
 export interface CaptchaChallenge {
+  imageBase64: string | Blob | undefined;
   captchaToken: string;
   /** Data URI PNG ("data:image/png;base64,..."). */
   captchaImageBase64: string;
@@ -160,14 +134,27 @@ export interface Item {
   sku: string;
   name: string;
   category: string;
+  categoryId?: string;
   unit: string;
+  unitId?: string;
   stock: number;
   minStock: number;
   price: number;
+  /** Berat satuan dalam gram, opsional — dipakai di resi pengiriman. */
+  weightGram?: number;
   warehouseId: string;
   warehouseName: string;
   status: 'tersedia' | 'menipis' | 'habis';
   updatedAt: string;
+  deskripsi?: string;
+  /** Dikunci (Protect) oleh super_admin — field sensitif disamarkan untuk karyawan. */
+  isProtected?: boolean;
+  /** Alur persetujuan khusus barang yang dibuat role admin. */
+  approvalStatus?: 'disetujui' | 'menunggu' | 'ditolak';
+  catatanApproval?: string;
+  /** ID user yang mengajukan (kalau approvalStatus bukan 'disetujui') —
+   * dipakai mencegah user meng-approve/reject pengajuannya sendiri. */
+  submittedByUserId?: number;
 }
 
 export interface Warehouse {
@@ -179,21 +166,31 @@ export interface Warehouse {
   usedCapacity: number;
   totalItems: number;
   picName: string;
+  /** Nomor kontak gudang — "No. Telepon Pengirim" di resi pengiriman. */
+  phone?: string;
   status: 'aktif' | 'nonaktif';
   latitude?: number;
   longitude?: number;
+  isProtected?: boolean;
 }
 
 export interface Supplier {
   id: string;
+  code?: string;
   name: string;
   contactPerson: string;
   phone: string;
-  email: string;
+  /** Daftar nama kurir mitra (mis. ["JNE", "J&T", "Lalamove"]) — menggantikan
+   * field email lama. Dipakai backend menghitung totalOrders/rating dari
+   * data Pengiriman yang memakai kurir-kurir ini. */
+  courierPartners: string[];
   address: string;
+  npwp?: string;
+  notes?: string;
   totalOrders: number;
   rating: number;
   status: 'aktif' | 'nonaktif';
+  isProtected?: boolean;
 }
 
 export type PurchaseOrderStatus = 'draft' | 'diproses' | 'dikirim' | 'selesai' | 'dibatalkan';
@@ -201,27 +198,71 @@ export type PurchaseOrderStatus = 'draft' | 'diproses' | 'dikirim' | 'selesai' |
 export interface PurchaseOrder {
   id: string;
   orderNumber: string;
+  supplierId?: string;
   supplierName: string;
   itemCount: number;
   totalAmount: number;
   orderDate: string;
   expectedDate: string;
   status: PurchaseOrderStatus;
+  /** Status ASLI dari backend (draft/diajukan/disetujui/ditolak/dibatalkan)
+   * — dipakai menentukan tombol alur kerja mana yang relevan (Ajukan/
+   * Setujui/Tolak/Batalkan), karena `status` di atas sudah dipetakan ke
+   * kosakata UI lama yang lebih sedikit (jadi ambigu untuk itu). */
+  rawStatus?: string;
+  isProtected?: boolean;
 }
 
 export type DeliveryStatus = 'menunggu' | 'dijemput' | 'perjalanan' | 'terkirim' | 'gagal';
+
+export interface DeliveryItem {
+  /** SKU dengan awalan "WRSD-" — lihat formatResiSku di Receipt.tsx untuk
+   * konvensi tampilannya. */
+  sku: string;
+  name: string;
+  qty: number;
+  unit: string;
+  /** Berat satuan (gram), kalau barang sudah diisi datanya. */
+  weightGram?: number;
+}
 
 export interface Delivery {
   id: string;
   code: string;
   origin: string;
+  /** ID gudang asal (bukan cuma nama) — dibutuhkan untuk prefill form Edit,
+   * karena backend WAJIB mengirim ulang gudang_asal_id saat PUT /pengiriman/:id. */
+  originGudangId?: number;
+  originAddress?: string;
+  originPhone?: string;
+  /** Koordinat GUDANG ASAL (beda dengan latitude/longitude di bawah, yang
+   * itu posisi GPS kurir live) — dipakai marker "Asal" di peta rute. */
+  originLatitude?: number;
+  originLongitude?: number;
+  /** Nomor dokumen Barang Keluar yang mendasari pengiriman ini, kalau ada
+   * — dipakai sebagai "Order ID" di resi (bukan ID numerik internal). */
+  orderId?: string;
+  items?: DeliveryItem[];
+  /** Koordinat tujuan (opsional) — tanpa ini peta pelacakan tidak bisa
+   * menggambar rute/marker tujuan. */
+  destLatitude?: number;
+  destLongitude?: number;
   destination: string;
   courierName: string;
   distanceKm: number;
   status: DeliveryStatus;
+  /** pickup | dropoff (backend: jenis_pengambilan). */
+  type: 'pickup' | 'dropoff';
   scheduledAt: string;
+  /** Waktu benar-benar terkirim (diisi backend saat status jadi "terkirim") — undefined kalau belum. */
+  deliveredAt?: string;
   latitude?: number;
   longitude?: number;
+  receiverName?: string;
+  receiverPhone?: string;
+  courierPhone?: string;
+  notes?: string;
+  isProtected?: boolean;
 }
 
 export interface InventoryRecord {
@@ -254,16 +295,43 @@ export interface ReportRow {
   status: string;
 }
 
-export type TaskStatus = 'baru' | 'proses' | 'selesai' | 'terlambat';
-export type TaskPriority = 'rendah' | 'sedang' | 'tinggi';
+export type JenisAset = 'tiang' | 'odc' | 'ont' | 'odp' | 'olt' | 'transportasi';
+export type AssetStatus = 'aktif' | 'rusak' | 'nonaktif';
 
-export interface Task {
+export interface Asset {
   id: string;
-  title: string;
-  assignee: string;
-  dueDate: string;
-  priority: TaskPriority;
-  status: TaskStatus;
+  nama: string;
+  jenisAset: JenisAset;
+  gudangId: string;
+  gudangNama: string;
+  /** Label RSD (tiang/odc/ont/odp/olt) — format {KodeGudang}-RSD-0001. */
+  labelRsd?: string;
+  /** Kode BA (transportasi) — format BA-0001. */
+  kodeBa?: string;
+  latitude?: number;
+  longitude?: number;
+  status: AssetStatus;
+  keterangan?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BarangRusakStatus = 'pengecekan' | 'retur' | 'rusak';
+
+export interface BarangRusak {
+  id: string;
+  barangId?: string;
+  labelBarang: string;
+  namaBarang: string;
+  keterangan?: string;
+  jenisBarang?: 'retur' | 'rusak' | '';
+  status: BarangRusakStatus;
+  dilaporkanOleh: string;
+  pelapor?: string;
+  dicekOleh?: string;
+  pemeriksa?: string;
+  dicekPada?: string;
+  createdAt: string;
 }
 
 export interface ManagedUser {
@@ -272,7 +340,12 @@ export interface ManagedUser {
   username: string;
   email: string;
   role: UserRole;
+  /** Status akun (diaktifkan/dinonaktifkan admin) — beda dari isOnline. */
   status: 'aktif' | 'nonaktif';
+  /** Status login REAL-TIME (punya sesi aktif sekarang). Dipakai kolom
+   * "Status" di tabel Manajemen User sesuai permintaan: user yang tidak
+   * sedang login tampil "Nonaktif", yang sedang login tampil "Aktif". */
+  isOnline?: boolean;
   lastLogin?: string;
 }
 

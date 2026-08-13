@@ -2,13 +2,14 @@
 
 import Image from 'next/image';
 import { motion } from 'framer-motion';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 
 interface AuthShellProps {
-  children: ReactNode;
+  readonly children: ReactNode;
   footer?: ReactNode;
-  step?: number;
-  totalSteps?: number;
+  readonly step?: number;
+  readonly totalSteps?: number;
+  onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
 }
 
 export function AuthShell({
@@ -16,7 +17,8 @@ export function AuthShell({
   footer,
   step = 1,
   totalSteps = 4,
-}: AuthShellProps): React.JSX.Element {
+  onKeyDown,
+}: Readonly <AuthShellProps>): React.JSX.Element {
   return (
     <div className="relative flex min-h-screen items-start justify-center overflow-hidden bg-white px-4 py-16">
       <span className="pointer-events-none absolute left-6 top-4 h-24 w-32 rounded-[60%_40%_55%_45%/50%_60%_40%_50%] bg-sidebarFrom animate-wms-float-slow" />
@@ -26,21 +28,29 @@ export function AuthShell({
 
       <div className="relative z-10 flex w-full max-w-md flex-col items-center">
         <motion.div
-          className="mb-[-40px] flex h-28 w-28 items-center justify-center overflow-hidden rounded-full bg-neutralBg shadow-card"
+          className="mb-5 flex h-28 w-28 items-center justify-center overflow-hidden rounded-full bg-black shadow-card"
           initial={{ opacity: 0, scale: 0.6, rotate: -12 }}
           animate={{ opacity: 1, scale: 1, rotate: 0 }}
           transition={{ type: 'spring', stiffness: 220, damping: 16 }}
         >
-          <Image src="/assets/stockrsdLogo.png" alt="Logo StokRSD WMS" width={112} height={112} priority />
+          <Image
+            src="/assets/icon_wms_square.png"
+            alt="Logo WMS-RSD"
+            width={112}
+            height={112}
+            priority
+            className="h-full w-full object-cover"
+          />
         </motion.div>
         <motion.div
           className="w-full overflow-hidden rounded-lg bg-surfaceAlt shadow-card"
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ type: 'spring', stiffness: 160, damping: 20, delay: 0.1 }}
+          onKeyDown={onKeyDown}
         >
-          <div className="px-8 pb-8 pt-16 text-center">
-            <h1 className="text-lg font-semibold text-text">StokRSD WMS</h1>
+          <div className="px-8 pb-8 pt-8 text-center">
+            <h1 className="text-lg font-semibold text-text">WMS-RSD</h1>
             <p className="text-sm text-textMuted">Masuk untuk kelola gudang</p>
           </div>
           <div className="px-8 pb-8">{children}</div>

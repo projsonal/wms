@@ -31,8 +31,36 @@ function writeStorage(key: string, value: string | null): void {
 }
 
 export const getAccessToken = (): string | null => readStorage(ACCESS_TOKEN_KEY);
-export const setAccessToken = (token: string | null): void => writeStorage(ACCESS_TOKEN_KEY, token);
 export const getRefreshToken = (): string | null => readStorage(REFRESH_TOKEN_KEY);
+
+/**
+ * Flag sesi non-sensitif untuk `middleware.ts` (pola ala Clerk: middleware
+ * di edge mengecek keberadaan sesi SEBELUM halaman dirender, supaya
+ * halaman terproteksi tidak sempat "kelihatan" sekilas sebelum redirect).
+ * Token asli (access/refresh) TETAP di localStorage & dikirim manual lewat
+ * header Authorization seperti sebelumnya — cookie ini isinya cuma "1",
+ * tidak membawa kredensial apa pun, jadi tidak menambah permukaan risiko
+ * walau bisa dibaca lewat document.cookie.
+ */
+const SESSION_FLAG_COOKIE = 'stockrsd_has_session';
+
+function setSessionFlagCookie(present: boolean): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+  if (present) {
+    // SameSite=Lax + tanpa flag Secure eksplisit (browser modern otomatis
+    // mewajibkan Secure untuk cookie non-httpOnly di origin https).
+    document.cookie = `${SESSION_FLAG_COOKIE}=1; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+  } else {
+    document.cookie = `${SESSION_FLAG_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  }
+}
+
+export const setAccessToken = (token: string | null): void => {
+  writeStorage(ACCESS_TOKEN_KEY, token);
+  setSessionFlagCookie(Boolean(token));
+};
 export const setRefreshToken = (token: string | null): void => writeStorage(REFRESH_TOKEN_KEY, token);
 
 /**
@@ -95,17 +123,77 @@ interface RequestOptions {
   skipBotToken?: boolean;
 }
 
+interface EnvelopeResult<TResponse> {
+  data: TResponse;
+  meta: PaginationMeta | undefined;
+}
+
 /**
- * Client HTTP tipis di atas fetch untuk memanggil REST API gostock.
- * - Membongkar Envelope `{ success, message, data, errors }` jadi `data` langsung.
- * - Menyisipkan `Authorization: Bearer <access_token>` otomatis.
- * - Menyisipkan & memperbarui `X-Bot-Token` otomatis (server merotasinya tiap respons).
- * - Melempar `BotCheckRequiredError` saat status 428 supaya UI bisa memicu modal captcha.
+ * Refresh access token OTOMATIS saat kedaluwarsa — access token cuma
+ * berumur 15 menit (JWT_ACCESS_EXPIRY_MINUTES), jadi tanpa ini SETIAP
+ * aksi (simpan form, dst.) yang dilakukan lebih dari 15 menit setelah
+ * login/refresh terakhir akan SELALU gagal dengan "token tidak valid
+ * atau kedaluwarsa" — persis kondisi yang tadinya membingungkan karena
+ * user tetap terlihat "login" (halaman tidak redirect ke /login) padahal
+ * token di baliknya sudah basi. `refreshPromise` di-share supaya banyak
+ * request yang gagal bersamaan tidak memicu banyak panggilan refresh
+ * paralel (cukup satu, yang lain menunggu hasil yang sama).
  */
-export async function apiRequest<TResponse>(
+let refreshPromise: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  const currentRefreshToken = getRefreshToken();
+  if (!currentRefreshToken) {
+    return false;
+  }
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ refresh_token: currentRefreshToken }),
+        });
+        if (!response.ok) {
+          return false;
+        }
+        const rawEnvelope = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null;
+        const envelope = rawEnvelope ? camelizeKeysDeep<ApiEnvelope<Record<string, unknown>>>(rawEnvelope) : null;
+        if (!envelope?.success || !envelope.data) {
+          return false;
+        }
+        const newAccessToken = envelope.data.accessToken as string | undefined;
+        const newRefreshToken = envelope.data.refreshToken as string | undefined;
+        if (!newAccessToken) {
+          return false;
+        }
+        setAccessToken(newAccessToken);
+        if (newRefreshToken) {
+          setRefreshToken(newRefreshToken);
+        }
+        return true;
+      } catch {
+        return false;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
+/**
+ * Inti pengambilan data yang dipakai `apiRequest`/`apiRequestWithMeta` —
+ * ekstrak jadi satu fungsi supaya logika retry-setelah-refresh-token tidak
+ * perlu ditulis dua kali. `isRetry` mencegah retry berulang tanpa akhir
+ * kalau refresh sendiri juga gagal (mis. refresh token juga sudah
+ * kedaluwarsa — dalam kasus itu, sesi memang harus login ulang).
+ */
+async function executeRequest<TResponse>(
   path: string,
-  options: RequestOptions = {},
-): Promise<TResponse> {
+  options: RequestOptions,
+  isRetry = false,
+): Promise<EnvelopeResult<TResponse>> {
   const { method = 'GET', body, signal, skipAuth = false, skipBotToken = false } = options;
 
   const headers: Record<string, string> = {
@@ -137,79 +225,36 @@ export async function apiRequest<TResponse>(
     setBotToken(rotatedBotToken);
   }
 
+  // Access token kedaluwarsa -> coba refresh SEKALI, lalu ulangi request
+  // asli dengan token baru. Tidak berlaku untuk request yang memang tidak
+  // butuh auth (skipAuth) atau yang sudah pernah di-retry sebelumnya.
+  if (response.status === 401 && !skipAuth && !isRetry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return executeRequest<TResponse>(path, options, true);
+    }
+    // Refresh token juga sudah tidak berlaku -> sesi memang harus diulang
+    // dari awal; bersihkan token basi supaya UI tidak terjebak "terlihat
+    // login" padahal tidak ada token valid sama sekali.
+    clearSession();
+  }
+
   const rawEnvelope = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null;
 
   // Beberapa deployment backend gostock membalas gerbang anti-bot dengan
   // status non-428 (mis. 401/403) tapi tetap membawa pesan yang menyuruh
   // menuntaskan captcha di /security/challenge. Deteksi juga polanya di
   // pesan supaya UI tetap memicu modal captcha, bukan cuma teks error datar.
+  // Fallback berbasis kata kunci ini SENGAJA dilewati untuk endpoint yang
+  // skipBotToken=true (yaitu /captcha & /security sendiri) — endpoint itu
+  // wajar membalas pesan yang memuat kata "captcha" untuk error aslinya
+  // sendiri (mis. "gagal membuat captcha", "jawaban captcha salah"), dan
+  // tanpa pengecualian ini pesan asli itu akan salah tertangkap sebagai
+  // "perlu bot-check lagi" alih-alih ditampilkan apa adanya ke user.
   const looksLikeBotCheck =
     response.status === 428 ||
-    (!response.ok &&
-      typeof rawEnvelope?.message === 'string' &&
-      /bot|captcha/i.test(rawEnvelope.message));
-
-  if (looksLikeBotCheck) {
-    throw new BotCheckRequiredError();
-  }
-
-  const envelope = rawEnvelope ? camelizeKeysDeep<ApiEnvelope<TResponse>>(rawEnvelope) : null;
-
-  if (!response.ok || !envelope?.success) {
-    throw new HttpError(
-      envelope?.message ?? `Permintaan gagal dengan status ${response.status}`,
-      String(response.status),
-      toFieldErrorMap(envelope?.errors),
-    );
-  }
-
-  return envelope.data as TResponse;
-}
-
-/**
- * Sama seperti `apiRequest`, tapi juga mengembalikan `meta` dari envelope
- * (dipakai endpoint list yang berpaginasi — lihat pkg/utils/response.go
- * `OKWithMeta` di backend, yang menaruh info halaman di `meta`, BUKAN
- * disisipkan ke dalam `data`).
- */
-export async function apiRequestWithMeta<TResponse>(
-  path: string,
-  options: RequestOptions = {},
-): Promise<{ data: TResponse; meta: PaginationMeta | undefined }> {
-  const { method = 'GET', body, signal, skipAuth = false, skipBotToken = false } = options;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-
-  const accessToken = skipAuth ? null : getAccessToken();
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
-
-  const botToken = skipBotToken ? null : getBotToken();
-  if (botToken) {
-    headers[BOT_TOKEN_HEADER] = botToken;
-  }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(snakeizeKeysDeep(body)) : undefined,
-    signal,
-  });
-
-  const rotatedBotToken = response.headers.get(BOT_TOKEN_HEADER);
-  if (rotatedBotToken) {
-    setBotToken(rotatedBotToken);
-  }
-
-  const rawEnvelope = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null;
-
-  const looksLikeBotCheck =
-    response.status === 428 ||
-    (!response.ok &&
+    (!skipBotToken &&
+      !response.ok &&
       typeof rawEnvelope?.message === 'string' &&
       /bot|captcha/i.test(rawEnvelope.message));
 
@@ -230,6 +275,35 @@ export async function apiRequestWithMeta<TResponse>(
   return { data: envelope.data as TResponse, meta: envelope.meta as PaginationMeta | undefined };
 }
 
+/**
+ * Client HTTP tipis di atas fetch untuk memanggil REST API gostock.
+ * - Membongkar Envelope `{ success, message, data, errors }` jadi `data` langsung.
+ * - Menyisipkan `Authorization: Bearer <access_token>` otomatis.
+ * - Menyisipkan & memperbarui `X-Bot-Token` otomatis (server merotasinya tiap respons).
+ * - Refresh access token otomatis sekali kalau kedaluwarsa (lihat executeRequest).
+ * - Melempar `BotCheckRequiredError` saat status 428 supaya UI bisa memicu modal captcha.
+ */
+export async function apiRequest<TResponse>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<TResponse> {
+  const { data } = await executeRequest<TResponse>(path, options);
+  return data;
+}
+
+/**
+ * Sama seperti `apiRequest`, tapi juga mengembalikan `meta` dari envelope
+ * (dipakai endpoint list yang berpaginasi — lihat pkg/utils/response.go
+ * `OKWithMeta` di backend, yang menaruh info halaman di `meta`, BUKAN
+ * disisipkan ke dalam `data`).
+ */
+export async function apiRequestWithMeta<TResponse>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ data: TResponse; meta: PaginationMeta | undefined }> {
+  return executeRequest<TResponse>(path, options);
+}
+
 export interface PaginationMeta {
   page: number;
   limit: number;
@@ -238,7 +312,7 @@ export interface PaginationMeta {
 }
 
 export const apiClient = {
-  get: <T>(path: string, signal?: AbortSignal) => apiRequest<T>(path, { method: 'GET', signal }),
+  get: <T>(path: string, options?: RequestOptions) => apiRequest<T>(path, { method: 'GET', ...options }),
   /** Untuk endpoint list yang berpaginasi (mengembalikan `meta` dari backend). */
   getPaginated: <T>(path: string, signal?: AbortSignal) =>
     apiRequestWithMeta<T[]>(path, { method: 'GET', signal }),
@@ -248,5 +322,54 @@ export const apiClient = {
   patch: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
 };
+
+/**
+ * Unduh file biner (Excel/PDF/DOCX, dsb) dari backend — beda dari
+ * `apiClient.*` di atas yang selalu mengharap balasan JSON. Dipakai untuk
+ * endpoint seperti `/laporan/export` yang membalas file langsung lewat
+ * header Content-Disposition, bukan `{ data, meta }`.
+ */
+export async function downloadFile(path: string, suggestedFilename?: string): Promise<void> {
+  async function attempt(isRetry: boolean): Promise<Response> {
+    const accessToken = getAccessToken();
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    });
+    if (res.status === 401 && !isRetry) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        return attempt(true);
+      }
+      clearSession();
+    }
+    return res;
+  }
+
+  const response = await attempt(false);
+  if (!response.ok) {
+    let message = `Gagal mengunduh file (status ${response.status}).`;
+    try {
+      const body = (await response.json()) as ApiEnvelope<unknown>;
+      if (body?.message) message = body.message;
+    } catch {
+      // respons error bukan JSON (mis. HTML dari proxy) -> pakai pesan default di atas
+    }
+    throw new HttpError(message, String(response.status));
+  }
+
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const filenameMatch = /filename="?([^";]+)"?/i.exec(disposition);
+  const filename = filenameMatch?.[1] ?? suggestedFilename ?? 'unduhan';
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 export { HttpError };

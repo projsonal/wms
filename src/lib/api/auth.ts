@@ -1,18 +1,13 @@
 import { apiClient, setAccessToken, setRefreshToken } from '@/lib/api/client';
+import { setDemoUser } from '@/auth/demo';
 import type {
   AuthFlowResponse,
   AuthUser,
   LoginPayload,
-  OtpMethod,
   RegisterPayload,
-  RequestOtpResponse,
-  RequestPasswordResetPayload,
-  RequestPasswordResetResponse,
-  ResetPasswordPayload,
   SessionInfo,
   Setup2FAResponse,
   UserRole,
-  VerifyPasswordResetOtpPayload,
 } from '@/types';
 
 /**
@@ -54,6 +49,16 @@ function persistSessionIfPresent(res: AuthFlowResponse): AuthFlowResponse {
   if (res.refreshToken) {
     setRefreshToken(res.refreshToken);
   }
+  if (res.accessToken || res.refreshToken) {
+    // Login/registrasi ASLI berhasil -> pastikan tidak ada sisa user demo
+    // ("Coba tanpa akun") yang nyangkut di localStorage. Kalau dibiarkan,
+    // AuthContext.refreshUser() akan lebih memprioritaskan user demo
+    // (lihat urutan ceknya) padahal token asli sudah aktif, menyebabkan
+    // UI menampilkan role yang TIDAK SAMA dengan role sesungguhnya di
+    // token yang benar-benar dikirim ke backend -> semua request nyata
+    // ditolak "role anda tidak diizinkan" walau tampilan sempat terlihat benar.
+    setDemoUser(null);
+  }
   return res;
 }
 
@@ -61,12 +66,23 @@ function persistSessionIfPresent(res: AuthFlowResponse): AuthFlowResponse {
  * Endpoint-endpoint autentikasi, 1:1 dengan
  * internal/controller/auth/auth_controller.go pada backend gostock.
  *
- * Alur login: login() -> (setupTwoFactor()+confirmTwoFactorSetup()) ATAU
- * (requestOtp()+verifyOtp()) -> token sesi didapat dari langkah konfirmasi/
- * verifikasi terakhir, BUKAN dari login() itu sendiri (login() hanya
- * memberi `pendingToken` sebagai jembatan sementara).
+ * Alur login (aplikasi internal, 2FA OPSIONAL): login() -> kalau user
+ * belum aktifkan 2FA, sesi (access/refresh token) sudah langsung ada di
+ * respons login() itu sendiri (tidak ada langkah tambahan). Kalau user
+ * SUDAH aktifkan 2FA sendiri lewat Settings, login() cuma memberi
+ * `pendingToken` sementara, lalu requestOtp()+verifyOtp() yang memberi
+ * sesi sesungguhnya. Setup 2FA (setupTwoFactor()+confirmTwoFactorSetup())
+ * sekarang HANYA dipicu dari Settings -> Keamanan (lewat startTwoFactorSetup()),
+ * bukan lagi bagian wajib dari alur login/register.
  */
 export const authApi = {
+  /** Cek ketersediaan username secara live saat mengetik di form daftar —
+   * dipanggil dengan debounce dari RegisterStep, BUKAN dari submit form. */
+  checkUsernameAvailability: (username: string) =>
+    apiClient.get<{ available: boolean }>(
+      `/auth/username-available?username=${encodeURIComponent(username)}`,
+    ),
+
   register: (payload: RegisterPayload) =>
     apiClient
       .post<AuthFlowResponse>('/auth/register', payload, { skipAuth: true })
@@ -76,6 +92,13 @@ export const authApi = {
     apiClient
       .post<AuthFlowResponse>('/auth/login', payload, { skipAuth: true })
       .then(persistSessionIfPresent),
+
+  /** POST /auth/2fa/start (butuh login) — dipanggil dari Settings ->
+   * Keamanan saat user MEMILIH SENDIRI mengaktifkan 2FA (opsional, bukan
+   * lagi wajib saat register/login). Memberi pendingToken baru yang lalu
+   * dipakai ulang ke setupTwoFactor()/confirmTwoFactorSetup() di bawah —
+   * endpoint itu sendiri tidak berubah, cuma sumber pendingToken-nya beda. */
+  startTwoFactorSetup: () => apiClient.post<{ pendingToken: string }>('/auth/2fa/start'),
 
   setupTwoFactor: (pendingToken: string) =>
     apiClient.post<Setup2FAResponse>(
@@ -89,20 +112,7 @@ export const authApi = {
       .post<AuthFlowResponse>('/auth/2fa/confirm', payload, { skipAuth: true })
       .then(persistSessionIfPresent),
 
-  /** Minta kode OTP dikirim via WhatsApp (alternatif dari kode TOTP aplikasi Authenticator). */
-  requestOtp: (pendingToken: string, method: Extract<OtpMethod, 'whatsapp'> = 'whatsapp') =>
-    apiClient.post<RequestOtpResponse>(
-      '/auth/otp/request',
-      { pendingToken, method },
-      { skipAuth: true },
-    ),
-
-  verifyOtp: (payload: {
-    pendingToken: string;
-    otpCode: string;
-    method?: OtpMethod;
-    otpToken?: string;
-  }) =>
+  verifyOtp: (payload: { pendingToken: string; otpCode: string }) =>
     apiClient
       .post<AuthFlowResponse>('/auth/verify-otp', payload, { skipAuth: true })
       .then(persistSessionIfPresent),
@@ -118,26 +128,20 @@ export const authApi = {
 
   listSessions: () => apiClient.get<{ sessions: SessionInfo[] }>('/auth/sessions'),
 
-  revokeSession: (id: number) => apiClient.delete<null>(`/auth/sessions/${id}`),
+  revokeSession: (id: number) =>
+    apiClient.delete<{ revoked_current?: boolean }>(`/auth/sessions/${id}`),
 
   /**
-   * Alur lupa password: requestPasswordReset() mengirim OTP lewat
-   * WhatsApp/SMS ke nomor terdaftar -> verifyPasswordResetOtp() menukar
-   * kode OTP dengan konfirmasi bahwa reset boleh dilanjut -> resetPassword()
-   * menyimpan password baru. Nama endpoint & bentuk payload mengikuti pola
-   * REST /auth/* yang sudah ada; sesuaikan path di sini kalau kontrak
-   * backend gostock yang sebenarnya berbeda.
+   * Lupa password — SATU langkah (tidak lagi lewat OTP WhatsApp/SMS):
+   * identifier + password baru + captcha. Lihat catatan keamanan lengkap
+   * di internal/controller/auth/struct.go ResetPasswordRequest (backend)
+   * soal tradeoff menghapus verifikasi kepemilikan akun ini.
    */
-  requestPasswordReset: (payload: RequestPasswordResetPayload) =>
-    apiClient.post<RequestPasswordResetResponse>('/auth/password/forgot', payload, {
-      skipAuth: true,
-    }),
-
-  verifyPasswordResetOtp: (payload: VerifyPasswordResetOtpPayload) =>
-    apiClient.post<RequestPasswordResetResponse>('/auth/password/verify-otp', payload, {
-      skipAuth: true,
-    }),
-
-  resetPassword: (payload: ResetPasswordPayload) =>
-    apiClient.post<null>('/auth/password/reset', payload, { skipAuth: true }),
+  resetPassword: (payload: {
+    identifier: string;
+    newPassword: string;
+    newPasswordConfirmation: string;
+    captchaToken: string;
+    captchaAnswer: string;
+  }) => apiClient.post<null>('/auth/password/reset', payload, { skipAuth: true }),
 };

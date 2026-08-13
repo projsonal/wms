@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Download } from 'lucide-react';
 import { OtpInput } from '@/component/auth/OtpInput';
 import { Button } from '@/component/ui/Button';
 import { generateTotpQrDataUrl } from '@/lib/utils/totp-qr';
+import { useIsMobileDevice } from '@/lib/hooks/use-mobile-device';
 
 const EXPIRY_SECONDS = 5 * 60;
 
@@ -40,6 +42,12 @@ interface QrDisplayProps {
 
 /** Area gambar QR: tampilkan hasil generate, atau status memuat/gagal/menunggu data. */
 function QrDisplay({ qrDataUrl, qrError, secret, onRetry }: QrDisplayProps): React.JSX.Element {
+  // Deteksi PERANGKAT (User-Agent), bukan cuma lebar layar — supaya tombol
+  // unduh selalu tampil di HP/tablet sungguhan, tapi tidak ikut nongol di
+  // browser desktop yang jendelanya cuma diperkecil (beda dari pendekatan
+  // lama yang pakai class Tailwind `sm:hidden`).
+  const isMobileDevice = useIsMobileDevice();
+
   if (qrDataUrl) {
     return (
       <div className="flex flex-col items-center gap-2">
@@ -49,13 +57,22 @@ function QrDisplay({ qrDataUrl, qrError, secret, onRetry }: QrDisplayProps): Rea
           alt="QR kode aktivasi two factor authentication"
           className="h-40 w-40 rounded-md border border-borderSoft bg-white p-2"
         />
-        <a
-          href={qrDataUrl}
-          download="stokrsd-2fa-qr.png"
-          className="text-xs font-semibold text-accent underline sm:hidden"
-        >
-          Unduh gambar QR
-        </a>
+        {isMobileDevice ? (
+          <>
+            <a
+              href={qrDataUrl}
+              download="stokrsd-2fa-qr.png"
+              className="flex items-center gap-1.5 rounded-full border border-accent/40 bg-accentSoft px-3 py-1.5 text-xs font-semibold text-accentDark transition-colors hover:bg-accentSoft/80"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              Unduh Barcode QR
+            </a>
+            <p className="max-w-[220px] text-[11px] text-textMuted">
+              Simpan gambar ini, lalu import lewat menu &quot;Scan QR dari galeri&quot; di aplikasi
+              Authenticator.
+            </p>
+          </>
+        ) : null}
       </div>
     );
   }
@@ -189,7 +206,7 @@ export function TwoFactorSetupStep({
             <Button variant="secondary" className="flex-1" onClick={onCancel} disabled={isSubmitting}>
               Batalkan
             </Button>
-            <Button className="flex-1" onClick={onActivate} disabled={isSubmitting || otp.length < 6}>
+            <Button className="flex-1" onClick={onActivate} loading={isSubmitting} disabled={otp.length < 6}>
               Aktifkan
             </Button>
           </div>

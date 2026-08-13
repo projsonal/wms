@@ -1,13 +1,13 @@
-import { Input } from '@/component/ui/FormControls';
+import { Input, PasswordInput } from '@/component/ui/FormControls';
 import type { LoginPayload } from '@/types';
 
 interface LoginStepProps {
-  values: LoginPayload;
-  errors?: Partial<Record<keyof LoginPayload, string>>;
+  readonly values: LoginPayload;
+  readonly errors?: Partial<Record<keyof LoginPayload, string>>;
   onChange: (values: LoginPayload) => void;
 }
 
-export function LoginStep({ values, errors, onChange }: LoginStepProps): React.JSX.Element {
+export function LoginStep({ values, errors, onChange }: Readonly <LoginStepProps>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4">
       <Input
@@ -19,10 +19,9 @@ export function LoginStep({ values, errors, onChange }: LoginStepProps): React.J
         error={errors?.username}
         autoComplete="username"
       />
-      <Input
+      <PasswordInput
         id="password"
         label="Password"
-        type="password"
         placeholder="Masukkan password"
         value={values.password}
         onChange={(event) => onChange({ ...values, password: event.target.value })}

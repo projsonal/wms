@@ -12,6 +12,7 @@ interface TrendChartCardProps {
   data: TrendPoint[];
   primaryLabel: string;
   secondaryLabel?: string;
+  errorMessage?: string;
 }
 
 export function TrendChartCard({
@@ -20,6 +21,7 @@ export function TrendChartCard({
   data,
   primaryLabel,
   secondaryLabel,
+  errorMessage,
 }: TrendChartCardProps): React.JSX.Element {
   return (
     <Card className="flex flex-col gap-4">
@@ -52,6 +54,11 @@ export function TrendChartCard({
         </div>
       </div>
       <div className="h-64 w-full">
+        {errorMessage ? (
+          <p className="flex h-full items-center justify-center text-center text-xs text-dangerText">
+            {errorMessage}
+          </p>
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
             <XAxis
@@ -91,6 +98,7 @@ export function TrendChartCard({
             ) : null}
           </LineChart>
         </ResponsiveContainer>
+        )}
       </div>
     </Card>
   );

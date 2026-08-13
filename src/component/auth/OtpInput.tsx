@@ -4,12 +4,12 @@ import { useRef } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 
 interface OtpInputProps {
-  length?: number;
-  value: string;
+  readonly length?: number;
+  readonly value: string;
   onChange: (value: string) => void;
 }
 
-export function OtpInput({ length = 6, value, onChange }: OtpInputProps): React.JSX.Element {
+export function OtpInput({ length = 6, value, onChange }: Readonly <OtpInputProps>): React.JSX.Element {
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
   const digits = Array.from({ length }, (_, index) => value[index] ?? '');
 

@@ -33,7 +33,11 @@ export const securityApi = {
       }),
 };
 
-/** GET /captcha — soal captcha terpisah yang dipakai khusus di form /register. */
+/** GET /captcha — soal captcha terpisah yang dipakai khusus di form /register
+ * & /forgot-password. skipBotToken: true karena endpoint ini sendiri yang
+ * membuat soal captcha (bukan yang butuh diverifikasi), dan supaya error
+ * asli dari endpoint ini (mis. captcha gagal dibuat di server) tidak salah
+ * tertangkap sebagai "perlu bot-check lagi" oleh apiClient. */
 export const captchaApi = {
-  generate: () => apiClient.get<CaptchaChallenge>('/captcha'),
+  generate: () => apiClient.get<CaptchaChallenge>('/captcha', { skipBotToken: true }),
 };

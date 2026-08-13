@@ -1,124 +1,307 @@
 'use client';
 
 import { useState } from 'react';
+import useSWR from 'swr';
+import { toast } from 'sonner';
+import { CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
 import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { Modal } from '@/component/ui/Modal';
-import { Input } from '@/component/ui/FormControls';
+import { Input, NumberField, Select } from '@/component/ui/FormControls';
 import { StatsRow } from '@/component/ui/StatsRow';
-import { inventoryApi } from '@/lib/api/modules';
+import { useConfirm } from '@/component/ui/ConfirmDialog';
+import { useAuth } from '@/auth/AuthContext';
+import { usePermissions } from '@/lib/hooks/usePermissions';
+import { inventoryApi, warehousesApi, itemsApi, type StockOpnamePayload } from '@/lib/api/modules';
 import { useResourceList } from '@/lib/hooks/useResourceList';
-import { SEED_INVENTORY } from '@/lib/data/sample-data';
-import { formatDate, formatNumber } from '@/lib/utils/format';
+import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
+import { useExportFormat } from '@/lib/hooks/useExportFormat';
+import { printRowsToPdf } from '@/lib/utils/export-pdf';
+import { formatDate } from '@/lib/utils/format';
 import { GENERIC_STATUS_META } from '@/lib/utils/status';
-import type { InventoryRecord } from '@/types';
+import type { RawStockOpname } from '@/lib/api/raw-types';
+
+interface ItemRow {
+  key: string;
+  barangId: string;
+  stokFisik: number;
+}
+
+let rowKeyCounter = 0;
+function nextRowKey(): string {
+  rowKeyCounter += 1;
+  return `so-row-${rowKeyCounter}`;
+}
+
+function emptyRow(): ItemRow {
+  return { key: nextRowKey(), barangId: '', stokFisik: 0 };
+}
+
+const SO_STATUS_META: Record<string, { label: string; variant: 'success' | 'warning' | 'neutral' }> = {
+  draft: { label: 'Draft', variant: 'warning' },
+  selesai: { label: 'Selesai', variant: 'success' },
+  dibatalkan: { label: 'Dibatalkan', variant: 'neutral' },
+};
 
 export function InventoryManagementContent(): React.JSX.Element {
-  const { rows, isLoading, mutate } = useResourceList(
-    'inventory-management',
-    inventoryApi,
-    SEED_INVENTORY,
-  );
-  const [adjusting, setAdjusting] = useState<InventoryRecord | null>(null);
-  const [newQuantity, setNewQuantity] = useState(0);
+  const { user } = useAuth();
+  const isStaff = user?.role === 'super_admin' || user?.role === 'admin';
+  const { can } = usePermissions();
+  const canCreateOpname = isStaff || can('stock_opname', 'tambah');
+  const canCompleteOpname = isStaff || can('stock_opname', 'edit');
+  const confirm = useConfirm();
+  const { requestExport, dialog: exportDialog } = useExportFormat();
 
-  function openAdjustModal(record: InventoryRecord): void {
-    setAdjusting(record);
-    setNewQuantity(record.quantity);
+  const { rows, isLoading, error, mutate } = useResourceList('stock-opname-sessions', {
+    list: inventoryApi.listSessions,
+  });
+  const { data: warehouseList } = useSWR('warehouses-for-opname', () => warehousesApi.list({ pageSize: 100 }));
+  const { data: itemList } = useSWR('items-for-opname', () => itemsApi.list({ pageSize: 500 }));
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [gudangId, setGudangId] = useState('');
+  const [tanggal, setTanggal] = useState('');
+  const [catatan, setCatatan] = useState('');
+  const [itemRows, setItemRows] = useState<ItemRow[]>([emptyRow()]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  function openCreateModal(): void {
+    setGudangId('');
+    setTanggal(new Date().toISOString().slice(0, 10));
+    setCatatan('');
+    setItemRows([emptyRow()]);
+    setIsModalOpen(true);
   }
 
-  async function submitAdjustment(): Promise<void> {
-    if (!adjusting) return;
+  function updateRow(key: string, patch: Partial<ItemRow>): void {
+    setItemRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
+
+  function removeRow(key: string): void {
+    setItemRows((prev) => (prev.length > 1 ? prev.filter((r) => r.key !== key) : prev));
+  }
+
+  async function handleSave(): Promise<void> {
+    const validRows = itemRows.filter((r) => r.barangId);
+    if (!gudangId || !tanggal || validRows.length === 0) {
+      toast.error('Gudang, tanggal, dan minimal 1 barang wajib diisi.');
+      return;
+    }
+    setIsSaving(true);
     try {
-      await inventoryApi.update(adjusting.id, { quantity: newQuantity });
-    } finally {
+      const payload: StockOpnamePayload = {
+        gudangId: Number(gudangId),
+        tanggal,
+        catatan,
+        items: validRows.map((r) => ({ barangId: Number(r.barangId), stokFisik: r.stokFisik })),
+      };
+      await inventoryApi.create(payload);
+      toast.success('Sesi Stock Opname berhasil dibuat (status: Draft).');
+      setIsModalOpen(false);
       await mutate();
-      setAdjusting(null);
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal membuat sesi Stock Opname.'));
+    } finally {
+      setIsSaving(false);
     }
   }
 
-  const columns: DataTableColumn<InventoryRecord>[] = [
-    { key: 'item', header: 'Nama Barang', render: (row) => row.itemName },
-    { key: 'warehouse', header: 'Gudang', render: (row) => row.warehouseName },
-    {
-      key: 'qty',
-      header: 'Kuantitas Sistem',
-      align: 'right',
-      render: (row) => `${formatNumber(row.quantity)} ${row.unit}`,
-    },
-    { key: 'variance', header: 'Selisih Opname', align: 'right', render: (row) => row.variance },
+  async function handleComplete(row: RawStockOpname): Promise<void> {
+    const ok = await confirm({
+      title: 'Selesaikan Stock Opname?',
+      message: `Selisih hasil hitung fisik akan langsung diterapkan ke stok sistem untuk ${row.nomorOpname}. Lanjutkan?`,
+      confirmLabel: 'Ya, Selesaikan',
+      variant: 'protect',
+    });
+    if (!ok) return;
+    try {
+      await inventoryApi.complete(String(row.id));
+      toast.success('Stock Opname selesai, stok sistem sudah disesuaikan.');
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal menyelesaikan Stock Opname.'));
+    }
+  }
+
+  async function handleDelete(row: RawStockOpname): Promise<void> {
+    const ok = await confirm({
+      title: 'Hapus Sesi Stock Opname',
+      message: `Apakah yakin ingin menghapus data ini? (${row.nomorOpname})`,
+      confirmLabel: 'Ya, Hapus',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await inventoryApi.remove(String(row.id));
+      toast.success('Sesi Stock Opname berhasil dihapus.');
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal menghapus — pastikan masih berstatus Draft.'));
+    }
+  }
+
+  const columns: DataTableColumn<RawStockOpname>[] = [
+    { key: 'nomor', header: 'No. Opname', render: (row) => row.nomorOpname },
+    { key: 'gudang', header: 'Gudang', render: (row) => row.gudang?.nama ?? '-' },
+    { key: 'tanggal', header: 'Tanggal', render: (row) => formatDate(row.tanggal) },
+    { key: 'items', header: 'Jumlah SKU', align: 'right', render: (row) => row.items?.length ?? 0 },
     {
       key: 'status',
       header: 'Status',
       render: (row) => {
-        const meta = GENERIC_STATUS_META[row.status];
-        return meta ? <Badge label={meta.label} variant={meta.variant} /> : row.status;
+        const meta = SO_STATUS_META[row.status] ?? GENERIC_STATUS_META.selesai;
+        return <Badge label={meta.label} variant={meta.variant} />;
       },
     },
     {
-      key: 'action',
-      header: 'Aksi',
+      key: 'actions',
+      header: '',
+      align: 'right',
       render: (row) => (
-        <Button variant="secondary" onClick={() => openAdjustModal(row)}>
-          Sesuaikan Stok
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          {row.status === 'draft' && canCompleteOpname ? (
+            <button
+              type="button"
+              onClick={() => handleComplete(row)}
+              title="Selesaikan & terapkan ke stok"
+              className="rounded p-1 text-textMuted hover:bg-successBg hover:text-successText"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {row.status === 'draft' && isStaff ? (
+            <button
+              type="button"
+              onClick={() => handleDelete(row)}
+              title="Hapus"
+              className="rounded p-1 text-textMuted hover:bg-dangerBg hover:text-dangerText"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
       ),
     },
   ];
 
   return (
-    <PageShell title="Manajemen Inventaris" breadcrumb="Manajemen / Manajemen Inventaris">
+    <PageShell
+      title="Manajemen Inventaris"
+      breadcrumb="Manajemen / Manajemen Inventaris"
+      action={canCreateOpname ? <Button onClick={openCreateModal}>+ Sesi Opname Baru</Button> : undefined}
+    >
       <StatsRow
         stats={[
-          { id: 'total', label: 'Total SKU Dipantau', value: rows.length },
-          {
-            id: 'selisih',
-            label: 'Perlu Penyesuaian',
-            value: rows.filter((r) => r.status === 'selisih').length,
-          },
-          {
-            id: 'opname-terakhir',
-            label: 'Opname Terbaru',
-            value: formatDate(rows[0]?.lastOpname ?? new Date()),
-          },
-          {
-            id: 'qty',
-            label: 'Total Kuantitas',
-            value: formatNumber(rows.reduce((sum, r) => sum + r.quantity, 0)),
-          },
+          { id: 'total', label: 'Total Sesi', value: rows.length },
+          { id: 'draft', label: 'Draft', value: rows.filter((r) => r.status === 'draft').length },
+          { id: 'selesai', label: 'Selesai', value: rows.filter((r) => r.status === 'selesai').length },
         ]}
       />
+      {/* Add/Complete/Delete sudah punya UI sendiri yang lebih pas (tombol
+          header "+ Sesi Opname Baru" & ikon per-baris) — Modify (bulk
+          edit) & Protect tidak relevan untuk sesi opname, jadi toolbar
+          generik cukup sisakan Export supaya tidak ada tombol dekoratif
+          yang terlihat aktif tapi sebenarnya tidak melakukan apa-apa. */}
       <DataTable
-        title="Penyesuaian Stok Opname"
-        description="Selisih antara catatan sistem dan hasil stok opname fisik"
+        title="Sesi Stock Opname"
+        description="Sesi hitung fisik stok per gudang — selesaikan untuk menerapkan selisih ke stok sistem"
         columns={columns}
         rows={rows}
-        getRowId={(row) => row.id}
+        getRowId={(row) => String(row.id)}
         isLoading={isLoading}
+        errorMessage={listErrorMessage(error)}
+        visibleActions={['export', 'print']}
+        module="stock_opname"
+        onRowAction={(action) => {
+          if (action !== 'export' && action !== 'print') return;
+          const columns = [
+            { header: 'No. Opname', accessor: (row: (typeof rows)[number]) => row.nomorOpname },
+            { header: 'Gudang', accessor: (row: (typeof rows)[number]) => row.gudang?.nama ?? '-' },
+            { header: 'Tanggal', accessor: (row: (typeof rows)[number]) => formatDate(row.tanggal) },
+            { header: 'Jumlah SKU', accessor: (row: (typeof rows)[number]) => String(row.items?.length ?? 0) },
+            { header: 'Status', accessor: (row: (typeof rows)[number]) => row.status },
+          ];
+          const pdfMeta = {
+            title: 'Rekap Data Gudang — Sesi Stock Opname',
+            subtitle: 'Manajemen / Manajemen Inventaris',
+            description: 'Riwayat sesi hitung fisik stok (stock opname) per gudang, beserta jumlah SKU yang dihitung dan status penerapannya ke stok sistem.',
+          };
+          if (action === 'export') {
+            requestExport(rows, columns, 'sesi-stock-opname', pdfMeta);
+          } else {
+            printRowsToPdf(rows, columns, { ...pdfMeta, generatedBy: user?.fullName });
+          }
+        }}
       />
+      {exportDialog}
 
       <Modal
-        isOpen={Boolean(adjusting)}
-        title={`Sesuaikan Stok - ${adjusting?.itemName ?? ''}`}
-        onClose={() => setAdjusting(null)}
-        onEnterSubmit={submitAdjustment}
+        isOpen={isModalOpen}
+        title="Sesi Stock Opname Baru"
+        onClose={() => setIsModalOpen(false)}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setAdjusting(null)}>
+            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
               Batal
             </Button>
-            <Button onClick={submitAdjustment}>Simpan Penyesuaian</Button>
+            <Button onClick={handleSave} loading={isSaving}>
+              Simpan (Draft)
+            </Button>
           </>
         }
       >
-        <Input
-          label="Kuantitas Baru"
-          type="number"
-          value={newQuantity}
-          onChange={(event) => setNewQuantity(Number(event.target.value))}
+        <Select
+          label="Gudang"
+          value={gudangId}
+          onChange={(e) => setGudangId(e.target.value)}
+          placeholder="Pilih gudang"
+          options={(warehouseList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
         />
+        <Input label="Tanggal" type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} />
+        <Input label="Catatan (opsional)" value={catatan} onChange={(e) => setCatatan(e.target.value)} />
+
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-text">Hasil Hitung Fisik</p>
+            <button
+              type="button"
+              onClick={() => setItemRows((prev) => [...prev, emptyRow()])}
+              className="flex items-center gap-1 text-xs font-semibold text-accentDark hover:underline"
+            >
+              <Plus className="h-3.5 w-3.5" /> Tambah Baris
+            </button>
+          </div>
+          {itemRows.map((row, index) => (
+            <div key={row.key} className="flex flex-col gap-3 rounded-md border border-borderSoft bg-neutralBg/40 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-textMuted">Baris {index + 1}</span>
+                {itemRows.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.key)}
+                    className="text-xs text-dangerText hover:underline"
+                  >
+                    Hapus baris
+                  </button>
+                ) : null}
+              </div>
+              <Select
+                label="Barang"
+                value={row.barangId}
+                onChange={(e) => updateRow(row.key, { barangId: e.target.value })}
+                placeholder="Pilih barang"
+                options={(itemList?.data ?? []).map((it) => ({ label: `${it.sku} — ${it.name}`, value: it.id }))}
+              />
+              <NumberField
+                label="Stok Fisik (hasil hitung)"
+                value={row.stokFisik}
+                onValueChange={(value) => updateRow(row.key, { stokFisik: value })}
+              />
+            </div>
+          ))}
+        </div>
       </Modal>
     </PageShell>
   );

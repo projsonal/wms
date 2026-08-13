@@ -5,12 +5,32 @@ import { toast } from 'sonner'
 
 export interface Notif { id: string; title: string; body: string; kind: string; time: string; created_at: string }
 
+const ASSET_NOTIF_PREF_KEY = 'wms_notif_asset_enabled'
+
+/** Preferensi "Notifikasi Aset" (Settings -> Notifikasi) — default AKTIF.
+ * Disimpan lokal per-perangkat (bukan per-akun di server) karena memang
+ * cuma soal "tampilkan/jangan tampilkan toast di browser ini", bukan
+ * pengaturan bisnis yang perlu tersinkron lintas perangkat. */
+export function isAssetNotifEnabled(): boolean {
+  if (typeof window === 'undefined') return true
+  const stored = window.localStorage.getItem(ASSET_NOTIF_PREF_KEY)
+  return stored === null ? true : stored === '1'
+}
+
+export function setAssetNotifEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(ASSET_NOTIF_PREF_KEY, enabled ? '1' : '0')
+}
+
 const KIND_LABELS: Record<string, { color: string; icon: string }> = {
   in: { color: 'bg-state-successBg text-state-successText', icon: '📦' },
   out: { color: 'bg-state-warningBg text-state-warningText', icon: '📤' },
   ship: { color: 'bg-state-infoBg text-state-infoText', icon: '🚚' },
   po: { color: 'bg-brand-accentSoft text-brand-accent', icon: '🛒' },
   opname: { color: 'bg-brand-surfaceAlt text-brand-textMuted', icon: '📋' },
+  new_asset: { color: 'bg-state-warningBg text-state-warningText', icon: '📍' },
+  barang_rusak: { color: 'bg-state-dangerBg text-state-dangerText', icon: '⚠️' },
+  new_item: { color: 'bg-state-successBg text-state-successText', icon: '✨' },
 }
 
 interface Ctx {
@@ -69,7 +89,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     if (swRef.current && swRef.current.active) {
       swRef.current.active.postMessage({ type: 'notify', payload: { title: n.title, body, tag: n.id } })
     } else {
-      try { new Notification(n.title, { body, icon: '/favicon.ico', tag: n.id }) } catch {}
+      try { new Notification(n.title, { body, icon: '/assets/icon_wms.ico', tag: n.id }) } catch {}
     }
   }, [kindLabel])
 
@@ -80,7 +100,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         const url = lastSeenRef.current ? `/dashboard/notifications?since=${encodeURIComponent(lastSeenRef.current)}` : '/dashboard/notifications'
         const r = await api<Notif[]>(url)
         if (r.success && Array.isArray(r.data)) {
-          const items = r.data
+          const items = r.data.filter((n) => (n.kind !== 'new_asset' && n.kind !== 'barang_rusak') || isAssetNotifEnabled())
           if (!initRef.current) {
             setNotifs(items)
             if (items.length) lastSeenRef.current = items[0].created_at

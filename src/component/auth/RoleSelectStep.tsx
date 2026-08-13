@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import { Crown, ShieldCheck, HardHat } from 'lucide-react';
 import { ROLE_OPTIONS, ROLE_LABEL } from '@/auth/roles';
 import type { UserRole } from '@/types';
 
@@ -6,6 +7,15 @@ interface RoleSelectStepProps {
   selectedRole: UserRole;
   onSelectRole: (role: UserRole) => void;
 }
+
+/** Ikon per role — dipilih supaya langsung intuitif tanpa perlu baca label:
+ * mahkota untuk pemegang akses penuh, perisai untuk pengelola operasional,
+ * helm proyek untuk pekerja lapangan/gudang. */
+const ROLE_ICON: Record<UserRole, React.ComponentType<{ className?: string }>> = {
+  super_admin: Crown,
+  admin: ShieldCheck,
+  karyawan: HardHat,
+};
 
 export function RoleSelectStep({ selectedRole, onSelectRole }: RoleSelectStepProps): React.JSX.Element {
   return (
@@ -24,6 +34,7 @@ export function RoleSelectStep({ selectedRole, onSelectRole }: RoleSelectStepPro
       <div className="grid grid-cols-3 gap-3">
         {ROLE_OPTIONS.map((option) => {
           const isActive = option.role === selectedRole;
+          const RoleIcon = ROLE_ICON[option.role];
           return (
             <button
               key={option.role}
@@ -38,11 +49,11 @@ export function RoleSelectStep({ selectedRole, onSelectRole }: RoleSelectStepPro
             >
               <span
                 className={clsx(
-                  'flex h-8 w-8 items-center justify-center rounded-full text-[10px]',
-                  isActive ? 'bg-white/20 text-white' : 'bg-neutralBg text-textMuted',
+                  'flex h-9 w-9 items-center justify-center rounded-full',
+                  isActive ? 'bg-white/20 text-white' : 'bg-neutralBg text-accentDark',
                 )}
               >
-                Icon
+                <RoleIcon className="h-4.5 w-4.5" />
               </span>
               <span className="font-semibold">{ROLE_LABEL[option.role]}</span>
               <span className={clsx('leading-snug', isActive ? 'text-white/80' : 'text-textMuted')}>

@@ -6,36 +6,39 @@ export interface ResourceListApi<T> {
   list: (params?: ListParams) => Promise<PaginatedResult<T>>;
 }
 
-function toFallback<T>(data: T[]): PaginatedResult<T> {
-  return { data, page: 1, pageSize: data.length, total: data.length };
-}
-
 /**
- * Mengambil daftar data dari REST API gostock via SWR.
- * `fallbackSeed` ditampilkan sementara backend belum tersedia,
- * lalu otomatis digantikan begitu API merespons.
+ * Mengambil daftar data dari REST API gostock via SWR — TIDAK ADA fallback
+ * data contoh/dummy. Kalau backend belum bisa dihubungi atau requestnya
+ * gagal, `rows` kosong dan `error` terisi, supaya halaman bisa menampilkan
+ * status yang jujur ("gagal memuat data") alih-alih diam-diam menampilkan
+ * data karangan yang bisa disalahartikan sebagai data asli.
+ *
+ * `refreshIntervalMs` (opsional): polling berkala — dipakai untuk data yang
+ * perlu terlihat "real-time" (mis. status online di Manajemen User),
+ * SENGAJA opsional (bukan default semua resource) supaya tabel lain yang
+ * tidak butuh live-update tidak membebani server dengan polling percuma.
  */
 export function useResourceList<T>(
   key: string,
   api: ResourceListApi<T>,
-  fallbackSeed: T[],
   params?: ListParams,
+  refreshIntervalMs?: number,
 ) {
   const { data, error, isLoading, mutate } = useSWR<PaginatedResult<T>>(
     [key, params],
     () => api.list(params),
     {
-      fallbackData: toFallback(fallbackSeed),
       revalidateOnFocus: false,
       shouldRetryOnError: false,
+      refreshInterval: refreshIntervalMs,
     },
   );
 
   return {
-    rows: data?.data ?? fallbackSeed,
-    total: data?.total ?? fallbackSeed.length,
+    rows: data?.data ?? [],
+    total: data?.total ?? 0,
     isLoading,
-    isUsingFallback: Boolean(error) || !data,
+    error,
     mutate,
   };
 }

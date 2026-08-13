@@ -2,8 +2,8 @@ import type {
   DeliveryStatus,
   PurchaseOrderStatus,
   StatusBadgeVariant,
-  TaskPriority,
-  TaskStatus,
+  AssetStatus,
+  BarangRusakStatus,
 } from '@/types';
 
 interface StatusMeta {
@@ -33,17 +33,25 @@ export const DELIVERY_STATUS_META: Record<DeliveryStatus, StatusMeta> = {
   gagal: { label: 'Gagal', variant: 'danger' },
 };
 
-export const TASK_STATUS_META: Record<TaskStatus, StatusMeta> = {
-  baru: { label: 'Baru', variant: 'info' },
-  proses: { label: 'Proses', variant: 'warning' },
-  selesai: { label: 'Selesai', variant: 'success' },
-  terlambat: { label: 'Terlambat', variant: 'danger' },
+export const ASSET_STATUS_META: Record<AssetStatus, StatusMeta> = {
+  aktif: { label: 'Aktif', variant: 'success' },
+  rusak: { label: 'Rusak', variant: 'danger' },
+  nonaktif: { label: 'Nonaktif', variant: 'neutral' },
 };
 
-export const TASK_PRIORITY_META: Record<TaskPriority, StatusMeta> = {
-  rendah: { label: 'Rendah', variant: 'neutral' },
-  sedang: { label: 'Sedang', variant: 'warning' },
-  tinggi: { label: 'Tinggi', variant: 'danger' },
+export const BARANG_RUSAK_STATUS_META: Record<BarangRusakStatus, StatusMeta> = {
+  pengecekan: { label: 'Menunggu Pengecekan', variant: 'warning' },
+  retur: { label: 'Bisa Diretur', variant: 'info' },
+  rusak: { label: 'Rusak', variant: 'danger' },
+};
+
+export const JENIS_ASET_META: Record<string, StatusMeta> = {
+  tiang: { label: 'Tiang', variant: 'info' },
+  odc: { label: 'ODC', variant: 'info' },
+  ont: { label: 'ONT', variant: 'info' },
+  odp: { label: 'ODP', variant: 'info' },
+  olt: { label: 'OLT', variant: 'info' },
+  transportasi: { label: 'Transportasi', variant: 'neutral' },
 };
 
 export const GENERIC_STATUS_META: Record<string, StatusMeta> = {
@@ -53,4 +61,10 @@ export const GENERIC_STATUS_META: Record<string, StatusMeta> = {
   selisih: { label: 'Selisih', variant: 'warning' },
   selesai: { label: 'Selesai', variant: 'success' },
   diproses: { label: 'Diproses', variant: 'warning' },
+  // Barang Masuk (& modul lain yang kebetulan simpan status berkapital di
+  // backend, lihat pkg/constant/cons_barangMasuk.go) — ditambahkan di
+  // samping versi huruf kecil di atas yang tetap dipakai modul lain
+  // (Barang Keluar/Stock Opname) yang memang simpan huruf kecil.
+  Draft: { label: 'Draft', variant: 'warning' },
+  Selesai: { label: 'Selesai', variant: 'success' },
 };

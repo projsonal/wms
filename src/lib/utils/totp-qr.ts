@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 
-const APP_ISSUER = 'StokRSD WMS';
+const APP_ISSUER = 'WMS-RSD';
 
 /**
  * Membentuk URI `otpauth://totp/...` standar yang dipahami semua aplikasi

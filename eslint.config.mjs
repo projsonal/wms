@@ -9,7 +9,6 @@ const eslintConfig = defineConfig([
   sonarjs.configs.recommended,
   {
     rules: {
-      // Ambang batas kompleksitas kognitif ala SonarQube.
       'sonarjs/cognitive-complexity': ['error', 15],
       'sonarjs/no-duplicate-string': ['warn', { threshold: 4 }],
       'sonarjs/no-identical-functions': 'warn',
@@ -21,9 +20,7 @@ const eslintConfig = defineConfig([
       'prefer-const': 'error',
     },
   },
-  // Override default ignores of eslint-config-next.
   globalIgnores([
-    // Default ignores of eslint-config-next:
     '.next/**',
     'out/**',
     'build/**',

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { CaptchaField } from '@/component/auth/CaptchaField';
 import { Button } from '@/component/ui/Button';
@@ -12,9 +12,6 @@ import type { CaptchaChallenge } from '@/types';
 type GateStatus = 'checking' | 'challenge' | 'ready';
 
 interface BotGateContextValue {
-  /** Dipanggil dari mana pun saat sebuah request gagal karena bot-token
-   * kedaluwarsa (`BotCheckRequiredError`), supaya gerbang captcha muncul
-   * lagi tanpa perlu me-refresh seluruh halaman. */
   requireRecheck: () => void;
 }
 
@@ -28,8 +25,16 @@ export function useBotGate(): BotGateContextValue {
   return ctx;
 }
 
-/** Helper supaya pemanggil tidak perlu try/catch manual di tiap tempat —
- * cukup bungkus pemanggilan API dengan ini di dalam <CaptchaGate>. */
+function LoadingDots(): React.JSX.Element {
+  return (
+    <span className="flex gap-1">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />
+    </span>
+  );
+}
+
 export function useRunWithBotGate() {
   const { requireRecheck } = useBotGate();
   return useCallback(
@@ -51,14 +56,7 @@ interface CaptchaGateProps {
   children: ReactNode;
 }
 
-/**
- * Backend gostock memasang middleware anti-bot di depan hampir seluruh
- * endpoint (termasuk /auth/*) yang mewajibkan header `X-Bot-Token` valid.
- * Komponen ini memastikan token itu ada SEBELUM form login/register
- * ditampilkan: cek diam-diam ke /security/verify, dan kalau belum lolos
- * tampilkan captcha singkat dulu.
- */
-export function CaptchaGate({ children }: CaptchaGateProps): React.JSX.Element {
+export function CaptchaGate({ children }: Readonly<CaptchaGateProps>): React.JSX.Element {
   const [status, setStatus] = useState<GateStatus>('checking');
   const [challenge, setChallenge] = useState<CaptchaChallenge | null>(null);
   const [answer, setAnswer] = useState('');
@@ -77,9 +75,6 @@ export function CaptchaGate({ children }: CaptchaGateProps): React.JSX.Element {
         setStatus('challenge');
       }
     } catch {
-      // Diagnosa lebih detail daripada "gagal" generik: cek dulu apakah
-      // backend-nya sama sekali tidak terjangkau (server mati/salah port/
-      // CORS) supaya pengguna tahu harus benerin apa.
       const health = await checkBackendHealth();
       setError(health.message);
       setStatus('challenge');
@@ -87,7 +82,6 @@ export function CaptchaGate({ children }: CaptchaGateProps): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- runCheck async, lihat AuthContext untuk pola yang sama
     runCheck();
   }, [runCheck]);
 
@@ -114,17 +108,20 @@ export function CaptchaGate({ children }: CaptchaGateProps): React.JSX.Element {
     }
   }
 
-  const contextValue: BotGateContextValue = {
+  const contextValue = useMemo<BotGateContextValue>(() => ({
     requireRecheck: () => runCheck(),
-  };
+  }), [runCheck]);
 
-  if (status === 'checking') {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white text-sm text-textMuted">
-        Memeriksa keamanan sesi...
+ if (status === 'checking') {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-white text-sm text-textMuted">
+      <div className="flex items-center gap-1">
+        <span>Memeriksa keamanan sesi</span>
+       <LoadingDots></LoadingDots>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   if (status === 'challenge') {
     return (
@@ -132,7 +129,7 @@ export function CaptchaGate({ children }: CaptchaGateProps): React.JSX.Element {
         <div className="w-full max-w-sm rounded-lg border border-borderSoft bg-surface p-6 shadow-card">
           <h1 className="text-base font-semibold text-text">Verifikasi Keamanan</h1>
           <p className="mt-1 text-xs text-textMuted">
-            Selesaikan captcha berikut untuk melanjutkan ke halaman login.
+            Selesaikan captcha terlebih dahulu, sebelum melanjutkan ke halaman login.
           </p>
           {challenge ? (
             <div className="mt-4">

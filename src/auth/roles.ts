@@ -27,54 +27,55 @@ const ALL_ROLES: UserRole[] = ['super_admin', 'admin', 'karyawan'];
 const STAFF_ROLES: UserRole[] = ['super_admin', 'admin'];
 
 /**
- * Struktur menu sidebar mengikuti desain asli StokRSD WMS.
- * "Manajemen User" dan "Task Manajemen" dibatasi untuk Super Admin & Admin
- * — Karyawan tidak diberi akses administratif ke user maupun penugasan lintas tim.
+ * Struktur menu sidebar mengikuti desain asli WMS-RSD.
+ * "Manajemen User" dan "Manajemen Aset Gudang" dibatasi untuk Super Admin & Admin
+ * — Karyawan tidak diberi akses administratif ke user maupun manajemen aset lintas gudang.
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Menu Utama',
     links: [
-      { label: 'Dashboard', href: '/dashboard', roles: ALL_ROLES },
-      { label: 'Pickup & Dropoff', href: '/pickup-dropoff', roles: ALL_ROLES },
-      { label: 'Purchase Order', href: '/purchase-order', roles: STAFF_ROLES },
-      { label: 'WMS', href: '/warehouse', roles: ALL_ROLES },
-      { label: 'Supplier', href: '/supplier', roles: STAFF_ROLES },
-      { label: 'Inventaris', href: '/inventory', roles: ALL_ROLES },
+      { label: 'Dashboard', href: '/home/dashboard', roles: ALL_ROLES },
+      { label: 'Pickup & Dropoff', href: '/home/pickup-dropoff', roles: ALL_ROLES },
+      { label: 'Purchase Order', href: '/home/purchase-order', roles: STAFF_ROLES },
+      { label: 'WMS', href: '/home/warehouse', roles: ALL_ROLES },
+      { label: 'Supplier', href: '/home/supplier', roles: STAFF_ROLES },
+      { label: 'Inventaris', href: '/home/inventory', roles: ALL_ROLES },
     ],
   },
   {
     title: 'Pengelolaan',
     links: [
-      { label: 'Barang Masuk', href: '/goods-in', roles: ALL_ROLES },
-      { label: 'Barang Keluar', href: '/goods-out', roles: ALL_ROLES },
-      { label: 'Kelola Barang', href: '/items', roles: ALL_ROLES },
+      { label: 'Barang Masuk', href: '/home/barang-masuk', roles: ALL_ROLES },
+      { label: 'Barang Keluar', href: '/home/barang-keluar', roles: ALL_ROLES },
+      { label: 'Kelola Barang', href: '/home/kelola-barang', roles: ALL_ROLES },
     ],
   },
   {
     links: [
-      { label: 'COD Monitoring', href: '/cod-monitoring', roles: ALL_ROLES },
-      { label: 'Monitoring Pengiriman', href: '/delivery-monitoring', roles: ALL_ROLES },
-      { label: 'Analisa Data', href: '/data-analysis', roles: STAFF_ROLES },
+      { label: 'COD Monitoring', href: '/home/cod-monitoring', roles: ALL_ROLES },
+      { label: 'Monitoring Pengiriman', href: '/home/delivery-monitoring', roles: ALL_ROLES },
+      { label: 'Analisa Data', href: '/home/data-analysis', roles: STAFF_ROLES },
     ],
   },
   {
     title: 'Manajemen',
     links: [
-      { label: 'Manajemen User', href: '/user-management', roles: ['super_admin'] },
-      { label: 'Task Manajemen', href: '/tasks', roles: ['super_admin'] },
-      { label: 'Manajemen Gudang', href: '/warehouse-management', roles: STAFF_ROLES },
-      { label: 'Manajemen Inventaris', href: '/inventory-management', roles: STAFF_ROLES },
+      { label: 'Manajemen User', href: '/home/user-management', roles: ['super_admin'] },
+      { label: 'Manajemen Aset Gudang', href: '/home/aset-gudang', roles: ALL_ROLES },
+      { label: 'Barang Rusak', href: '/home/barang-rusak', roles: ALL_ROLES },
+      { label: 'Manajemen Gudang', href: '/home/warehouse-management', roles: STAFF_ROLES },
+      { label: 'Manajemen Inventaris', href: '/home/inventory-management', roles: STAFF_ROLES },
     ],
   },
   {
     title: 'Laporan',
     links: [
-      { label: 'Laporan Inventaris', href: '/reports/inventory', roles: STAFF_ROLES },
-      { label: 'Laporan Barang Masuk', href: '/reports/goods-in', roles: STAFF_ROLES },
-      { label: 'Laporan Barang Keluar', href: '/reports/goods-out', roles: STAFF_ROLES },
-      { label: 'Laporan Barang Retur', href: '/reports/returns', roles: STAFF_ROLES },
-      { label: 'Laporan Gudang', href: '/reports/warehouse', roles: STAFF_ROLES },
+      { label: 'Laporan Inventaris', href: '/home/reports/inventory', roles: STAFF_ROLES },
+      { label: 'Laporan Barang Masuk', href: '/home/reports/barang-masuk', roles: STAFF_ROLES },
+      { label: 'Laporan Barang Keluar', href: '/home/reports/barang-keluar', roles: STAFF_ROLES },
+      { label: 'Laporan Barang Retur', href: '/home/reports/returns', roles: STAFF_ROLES },
+      { label: 'Laporan Stock Opname', href: '/home/reports/warehouse', roles: STAFF_ROLES },
     ],
   },
 ];

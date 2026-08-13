@@ -1,4 +1,7 @@
 @import 'tailwindcss';
+/* Wajib untuk react-leaflet (LiveTrackingMap) — tanpa ini peta tampil
+ * kosong/berantakan (tile & marker tidak punya ukuran/posisi yang benar). */
+@import 'leaflet/dist/leaflet.css';
 
 /*
  * Tailwind v4 memakai pendekatan "CSS-first": token di bawah ini
@@ -35,7 +38,44 @@
 
   --shadow-card: 0 8px 24px rgba(59, 20, 10, 0.06);
 
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: var(--font-app, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+}
+
+/*
+ * Mode Gelap — dipilih lewat Settings -> Tampilan -> Mode Gelap (lihat
+ * component/preferences/PreferencesContext.tsx), diterapkan sebagai class
+ * "dark" di <html>. Karena SELURUH komponen sudah memakai utility warna
+ * semantik (bg-surface, text-text, dst) yang di baliknya cuma
+ * var(--color-surface)/var(--color-text), override token di sini otomatis
+ * mengganti tema seluruh aplikasi TANPA perlu menyentuh satu pun komponen.
+ * Palet: coklat gelap hangat senada dengan sidebar (yang memang sudah
+ * gelap di kedua mode) + teks putih hangat, aksen oranye-rust dicerahkan
+ * sedikit supaya kontrasnya tetap nyaman di atas latar gelap.
+ */
+.dark {
+  --color-bg: #1c110b;
+  --color-accent: #e08a52;
+  --color-accentDark: #d97a4a;
+  --color-accentSoft: #4a2c1e;
+  --color-surface: #2a1810;
+  --color-surfaceAlt: #331d14;
+  --color-borderSoft: #4a2c1e;
+  --color-text: #f5ece6;
+  --color-textMuted: #c2a99d;
+  --color-successBg: #1f3820;
+  --color-successText: #7bd47f;
+  --color-warningBg: #3d2c14;
+  --color-warningText: #e8ab5c;
+  --color-dangerBg: #3d1c1c;
+  --color-dangerText: #e88585;
+  --color-infoBg: #1c2440;
+  --color-infoText: #93a6f0;
+  --color-neutralBg: #33241c;
+  --color-neutralText: #c2a99d;
+
+  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  color-scheme: dark;
 }
 
 * {
@@ -53,6 +93,7 @@ body {
   color: var(--color-text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 a {
@@ -171,6 +212,25 @@ button {
   }
 }
 
+/* Partikel emas melayang naik perlahan — dipakai layar transisi login
+   (WelcomeTransition) untuk kesan mewah/elegan, bukan lagi kotak gudang. */
+@keyframes wms-particle-rise {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateY(-140px) scale(1);
+    opacity: 0;
+  }
+}
+
 .animate-wms-float {
   animation: wms-float 6s ease-in-out infinite;
 }
@@ -218,4 +278,23 @@ button {
 
 .animate-wms-wheel {
   animation: wms-forklift-wheel 0.7s linear infinite;
+}
+
+.animate-wms-particle-rise {
+  animation: wms-particle-rise 4s ease-in-out infinite;
+}
+
+/* Sembunyikan panah tambah/kurang bawaan browser di semua <input type="number">
+   yang mungkin masih tersisa di halaman lain — kebijakan form: input angka
+   diketik polos, tanpa stepper. (Field baru pakai NumberField/CurrencyField
+   yang sudah type="text" dari awal, ini cuma jaring pengaman.) */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
