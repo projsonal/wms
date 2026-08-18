@@ -9,7 +9,7 @@ import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
 import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { Modal } from '@/component/ui/Modal';
-import { Input, Select } from '@/component/ui/FormControls';
+import { CurrencyField, Input, Select } from '@/component/ui/FormControls';
 import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
@@ -393,11 +393,10 @@ export function CodMonitoringContent(): React.JSX.Element {
           value={form.pelanggan}
           onChange={(e) => setForm({ ...form, pelanggan: e.target.value })}
         />
-        <Input
+        <CurrencyField
           label="Nominal (Rp)"
-          type="number"
-          value={form.nominal || ''}
-          onChange={(e) => setForm({ ...form, nominal: Number(e.target.value) })}
+          value={form.nominal}
+          onValueChange={(value) => setForm({ ...form, nominal: value })}
         />
         <Input label="Kurir" value={form.kurir} onChange={(e) => setForm({ ...form, kurir: e.target.value })} />
         <Input

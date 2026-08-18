@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { toast } from 'sonner';
-import { CheckCircle2, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle2, Eye, Plus, Trash2 } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
@@ -66,6 +66,28 @@ export function InventoryManagementContent(): React.JSX.Element {
   const [catatan, setCatatan] = useState('');
   const [itemRows, setItemRows] = useState<ItemRow[]>([emptyRow()]);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Detail baca-saja per sesi — sebelumnya sesi yang sudah "Selesai" tidak
+  // punya aksi apa pun di baris (Complete/Delete cuma tampil untuk Draft),
+  // jadi terlihat seperti tabelnya tidak bisa diapa-apakan sama sekali.
+  // "Detail" tersedia untuk SEMUA status supaya hasil hitung fisik per SKU
+  // (stok sistem vs stok fisik vs selisih) tetap bisa dilihat kapan pun.
+  const [detailFor, setDetailFor] = useState<RawStockOpname | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+
+  async function openDetail(row: RawStockOpname): Promise<void> {
+    setIsLoadingDetail(true);
+    setDetailFor(row);
+    try {
+      const full = await inventoryApi.getById(String(row.id));
+      setDetailFor(full);
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal memuat rincian sesi.'));
+      setDetailFor(null);
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  }
 
   function openCreateModal(): void {
     setGudangId('');
@@ -161,6 +183,14 @@ export function InventoryManagementContent(): React.JSX.Element {
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => openDetail(row)}
+            title="Lihat rincian hasil hitung"
+            className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark"
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </button>
           {row.status === 'draft' && canCompleteOpname ? (
             <button
               type="button"
@@ -302,6 +332,54 @@ export function InventoryManagementContent(): React.JSX.Element {
             </div>
           ))}
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={detailFor !== null}
+        title={detailFor ? `Rincian — ${detailFor.nomorOpname}` : 'Rincian Sesi'}
+        onClose={() => setDetailFor(null)}
+        footer={
+          <Button variant="secondary" onClick={() => setDetailFor(null)}>
+            Tutup
+          </Button>
+        }
+      >
+        {isLoadingDetail ? (
+          <p className="text-sm text-textMuted">Memuat rincian...</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-2 text-xs text-textMuted">
+              <p>Gudang: <span className="font-medium text-text">{detailFor?.gudang?.nama ?? '-'}</span></p>
+              <p>Tanggal: <span className="font-medium text-text">{detailFor ? formatDate(detailFor.tanggal) : '-'}</span></p>
+            </div>
+            {detailFor?.catatan ? (
+              <p className="text-xs text-textMuted">Catatan: {detailFor.catatan}</p>
+            ) : null}
+            <div className="flex flex-col gap-2">
+              {(detailFor?.items ?? []).length === 0 ? (
+                <p className="text-sm text-textMuted">Belum ada barang dihitung di sesi ini.</p>
+              ) : (
+                (detailFor?.items ?? []).map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 rounded-md border border-borderSoft px-3 py-2 text-sm"
+                  >
+                    <p className="min-w-0 truncate font-medium text-text">
+                      {item.barang?.nama ?? `Barang #${item.barangId}`}
+                    </p>
+                    <div className="flex shrink-0 items-center gap-3 text-xs text-textMuted">
+                      <span>Sistem: {item.stokSistem}</span>
+                      <span>Fisik: {item.stokFisik}</span>
+                      <span className={item.selisih !== 0 ? 'font-semibold text-dangerText' : 'font-semibold text-successText'}>
+                        Selisih: {item.selisih}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </Modal>
     </PageShell>
   );

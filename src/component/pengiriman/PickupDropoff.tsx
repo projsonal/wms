@@ -20,6 +20,7 @@ import { useResourceList } from '@/lib/hooks/useResourceList';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
+import { haversineKm, estimateDurationMin, formatDurationMin } from '@/lib/utils/geo';
 import { printResiPengiriman } from '@/lib/utils/print-resi';
 import { formatDate } from '@/lib/utils/format';
 import { DELIVERY_STATUS_META } from '@/lib/utils/status';
@@ -246,12 +247,44 @@ export function PickupDropoffContent(): React.JSX.Element {
     }
   }
 
+  // Jarak & estimasi waktu dihitung LANGSUNG di sini (garis lurus/haversine,
+  // tanpa request jaringan — lihat catatan panjang di lib/utils/geo.ts
+  // kenapa bukan rute jalan OSRM asli seperti di halaman Detail
+  // Pengiriman) dari koordinat gudang asal & tujuan, BUKAN dari
+  // `row.distanceKm` backend yang statis/tidak pernah ter-update —
+  // itulah sebabnya kolom Jarak sebelumnya selalu menampilkan "0 km".
+  function estimatedDistanceKm(row: Delivery): number | null {
+    if (
+      row.originLatitude === undefined ||
+      row.originLongitude === undefined ||
+      row.destLatitude === undefined ||
+      row.destLongitude === undefined
+    ) {
+      return null;
+    }
+    return haversineKm(
+      { lat: row.originLatitude, lng: row.originLongitude },
+      { lat: row.destLatitude, lng: row.destLongitude },
+    );
+  }
+
+  function distanceLabel(row: Delivery): string {
+    const km = estimatedDistanceKm(row);
+    return km === null ? '-' : `≈ ${km.toFixed(1)} km`;
+  }
+
+  function durationLabel(row: Delivery): string {
+    const km = estimatedDistanceKm(row);
+    return km === null ? '-' : `≈ ${formatDurationMin(estimateDurationMin(km))}`;
+  }
+
   const PICKUP_DROPOFF_COLUMNS = [
     { header: 'Kode', accessor: (row: Delivery) => row.code },
     { header: 'Asal', accessor: (row: Delivery) => row.origin },
     { header: 'Tujuan', accessor: (row: Delivery) => row.destination },
     { header: 'Kurir', accessor: (row: Delivery) => row.courierName || '-' },
-    { header: 'Jarak (km)', accessor: (row: Delivery) => String(row.distanceKm) },
+    { header: 'Jarak (perkiraan)', accessor: (row: Delivery) => distanceLabel(row) },
+    { header: 'Estimasi Waktu', accessor: (row: Delivery) => durationLabel(row) },
     { header: 'Jadwal', accessor: (row: Delivery) => formatDate(row.scheduledAt) },
     { header: 'Status', accessor: (row: Delivery) => DELIVERY_STATUS_META[row.status].label },
   ];
@@ -312,7 +345,8 @@ export function PickupDropoffContent(): React.JSX.Element {
     { key: 'origin', header: 'Asal', render: (row) => row.origin },
     { key: 'destination', header: 'Tujuan', render: (row) => row.destination },
     { key: 'courier', header: 'Kurir', render: (row) => row.courierName || '-' },
-    { key: 'distance', header: 'Jarak', align: 'right', render: (row) => `${row.distanceKm} km` },
+    { key: 'distance', header: 'Jarak', align: 'right', render: (row) => distanceLabel(row) },
+    { key: 'duration', header: 'Estimasi', align: 'right', render: (row) => durationLabel(row) },
     {
       key: 'status',
       header: 'Status',

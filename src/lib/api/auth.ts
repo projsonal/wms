@@ -26,6 +26,7 @@ interface MeResponseRaw {
   roleId: number;
   roleName: UserRole;
   is2faEnabled: boolean;
+  avatarUrl?: string;
 }
 
 function toAuthUser(raw: MeResponseRaw): AuthUser {
@@ -38,6 +39,7 @@ function toAuthUser(raw: MeResponseRaw): AuthUser {
     roleId: raw.roleId,
     role: raw.roleName,
     twoFactorEnabled: raw.is2faEnabled,
+    avatarUrl: raw.avatarUrl || undefined,
   };
 }
 
@@ -129,19 +131,19 @@ export const authApi = {
   listSessions: () => apiClient.get<{ sessions: SessionInfo[] }>('/auth/sessions'),
 
   revokeSession: (id: number) =>
-    apiClient.delete<{ revoked_current?: boolean }>(`/auth/sessions/${id}`),
+    apiClient.delete<{ revokedCurrent?: boolean }>(`/auth/sessions/${id}`),
 
   /**
    * Lupa password — SATU langkah (tidak lagi lewat OTP WhatsApp/SMS):
-   * identifier + password baru + captcha. Lihat catatan keamanan lengkap
-   * di internal/controller/auth/struct.go ResetPasswordRequest (backend)
-   * soal tradeoff menghapus verifikasi kepemilikan akun ini.
+   * identifier + password baru + human-check token. Backend TIDAK lagi
+   * menerima captcha gambar untuk endpoint ini (lihat ResetPasswordRequest
+   * di internal/controller/auth/struct.go) — token didapat lewat
+   * humanCheckApi.issue() / komponen HumanCheckField.
    */
   resetPassword: (payload: {
     identifier: string;
     newPassword: string;
     newPasswordConfirmation: string;
-    captchaToken: string;
-    captchaAnswer: string;
+    humanCheckToken: string;
   }) => apiClient.post<null>('/auth/password/reset', payload, { skipAuth: true }),
 };

@@ -22,7 +22,7 @@ import { GENERIC_STATUS_META } from '@/lib/utils/status';
 import type { Warehouse } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
-const EMPTY_FORM: Partial<Warehouse> = { name: '', address: '', picName: '', phone: '', capacity: 0 };
+const EMPTY_FORM: Partial<Warehouse> = { name: '', code: '', address: '', picName: '', phone: '', capacity: 0 };
 
 const CONFIRM_DELETE_MESSAGE = 'Apakah yakin ingin menghapus data ini?';
 const CONFIRM_PROTECT_LOCK_MESSAGE =
@@ -65,6 +65,7 @@ export function WarehouseListContent(): React.JSX.Element {
     setEditingId(row.id);
     setForm({
       name: row.name,
+      code: row.code ?? '',
       address: row.address,
       picName: row.picName,
       phone: row.phone ?? '',
@@ -76,6 +77,18 @@ export function WarehouseListContent(): React.JSX.Element {
   }
 
   async function handleSave(): Promise<void> {
+    // Backend mewajibkan "kode" (GudangRequest.Kode validate:"required") —
+    // tanpa ini, Create/Update selalu ditolak validasi (dulu field ini
+    // tidak ada di form sama sekali, sehingga Tambah/Ubah Gudang SELALU
+    // gagal dengan pesan generik "validasi gagal").
+    if (!form.name?.trim()) {
+      toast.error('Nama gudang wajib diisi.');
+      return;
+    }
+    if (!form.code?.trim()) {
+      toast.error('Kode gudang wajib diisi (mis. BBU, BDG1).');
+      return;
+    }
     setIsSaving(true);
     try {
       if (editingId) {
@@ -144,6 +157,7 @@ export function WarehouseListContent(): React.JSX.Element {
 
   const WAREHOUSE_EXPORT_COLUMNS = [
     { header: 'Nama Gudang', accessor: (r: Warehouse) => r.name },
+    { header: 'Kode', accessor: (r: Warehouse) => r.code },
     { header: 'Alamat / Koordinat', accessor: (r: Warehouse) => r.address },
     { header: 'PIC', accessor: (r: Warehouse) => r.picName },
     { header: 'Kapasitas Terpakai', accessor: (r: Warehouse) => r.usedCapacity },
@@ -270,6 +284,7 @@ export function WarehouseListContent(): React.JSX.Element {
         ]
       : []),
     { key: 'name', header: 'Nama Gudang', render: (row) => row.name },
+    { key: 'code', header: 'Kode', render: (row) => row.code },
     {
       key: 'address',
       header: 'Alamat',
@@ -386,11 +401,19 @@ export function WarehouseListContent(): React.JSX.Element {
           </>
         }
       >
-        <Input
-          label="Nama Gudang"
-          value={form.name ?? ''}
-          onChange={(event) => setForm({ ...form, name: event.target.value })}
-        />
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="Nama Gudang"
+            value={form.name ?? ''}
+            onChange={(event) => setForm({ ...form, name: event.target.value })}
+          />
+          <Input
+            label="Kode Gudang"
+            placeholder="mis. BBU, BDG1"
+            value={form.code ?? ''}
+            onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })}
+          />
+        </div>
         <Input
           label="Alamat"
           placeholder="Contoh: Jl. Manggahang No. 12, Bandung"

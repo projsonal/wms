@@ -3,6 +3,8 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { SidebarMobileToggle } from '@/component/layout/Sidebar';
+import { NotificationBell } from '@/component/layout/NotificationBell';
+import { TrashBin } from '@/component/layout/TrashBin';
 
 interface HeaderProps {
   title: string;
@@ -14,6 +16,13 @@ interface HeaderProps {
  * Header judul halaman + breadcrumb, ditampilkan di atas konten setiap
  * halaman dashboard. Bagian dari kerangka layout (bersama Sidebar & Footer),
  * karena itu ditempatkan di `component/layout`, bukan `component/ui`.
+ *
+ * NotificationBell & TrashBin SENGAJA dipasang di sini (bukan lewat prop
+ * `action` per halaman) supaya otomatis tampil di SEMUA halaman untuk
+ * SEMUA role — sebelumnya "Unduh Laporan" (action khusus halaman Laporan)
+ * jadi satu-satunya tempat notifikasi terlihat; sekarang keduanya lepas
+ * dari `action` dan selalu ada di ujung kanan header, di depan action
+ * spesifik halaman kalau ada.
  */
 export function Header({ title, breadcrumb, action }: HeaderProps): React.JSX.Element {
   return (
@@ -29,16 +38,16 @@ export function Header({ title, breadcrumb, action }: HeaderProps): React.JSX.El
           <p className="text-xs text-textMuted sm:text-sm">{breadcrumb}</p>
         </motion.div>
       </div>
-      {action ? (
-        <motion.div
-          className="flex items-center gap-3"
-          initial={{ opacity: 0, x: 12 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ type: 'spring', stiffness: 220, damping: 24, delay: 0.05 }}
-        >
-          {action}
-        </motion.div>
-      ) : null}
+      <motion.div
+        className="ml-auto flex items-center gap-2 sm:gap-3"
+        initial={{ opacity: 0, x: 12 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 24, delay: 0.05 }}
+      >
+        {action}
+        <TrashBin />
+        <NotificationBell />
+      </motion.div>
     </header>
   );
 }

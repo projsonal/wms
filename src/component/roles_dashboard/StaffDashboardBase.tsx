@@ -1,102 +1,23 @@
 'use client';
 
 import useSWR from 'swr';
-import Link from 'next/link';
-import { useAuth } from '@/auth/AuthContext';
-import { Badge } from '@/component/ui/Badge';
 import { StatCard } from '@/component/ui/StatCard';
-import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { TrendChartCard } from '@/component/charts/TrendChartCard';
-import { RecentActivityCard, type ActivityItem } from '@/component/roles_dashboard/RecentActivityCard';
 import { DeliveryTrackingCard } from '@/component/roles_dashboard/DeliveryTrackingCard';
+import { AttentionPanel } from '@/component/roles_dashboard/AttentionPanel';
 import { Card } from '@/component/ui/Card';
 import { Reveal } from '@/component/ui/Reveal';
-import { dashboardApi, deliveriesApi, goodsInApi, goodsOutApi } from '@/lib/api/modules';
-import type { RawBarangKeluar, RawBarangMasuk, DraftDocumentStatus, BarangMasukStatus } from '@/lib/api/raw-types';
-import { useExportFormat } from '@/lib/hooks/useExportFormat';
-import { printRowsToPdf } from '@/lib/utils/export-pdf';
+import Link from 'next/link';
+import { dashboardApi, deliveriesApi, itemsApi, purchaseOrdersApi } from '@/lib/api/modules';
 import { listErrorMessage } from '@/lib/utils/errors';
-import { formatDate, formatNumber, formatCurrency } from '@/lib/utils/format';
+import { formatCurrency } from '@/lib/utils/format';
 import type { StatMetric, TrendPoint, UserRole } from '@/types';
-
-interface TransactionRow {
-  id: string;
-  date: string;
-  code: string;
-  type: 'Masuk' | 'Keluar';
-  itemName: string;
-  quantity: string;
-  status: 'Selesai' | 'Proses' | 'Dibatalkan';
-}
-
-function statusLabel(status: DraftDocumentStatus | BarangMasukStatus): TransactionRow['status'] {
-  const normalized = status.toLowerCase();
-  if (normalized === 'selesai') return 'Selesai';
-  if (normalized === 'dibatalkan') return 'Dibatalkan';
-  return 'Proses';
-}
-
-function statusVariant(status: TransactionRow['status']): 'success' | 'warning' | 'danger' {
-  if (status === 'Selesai') return 'success';
-  if (status === 'Dibatalkan') return 'danger';
-  return 'warning';
-}
-
-/** Pecah satu dokumen barang masuk/keluar (header + banyak item) jadi
- * satu baris tabel per item, supaya bentuknya sama dengan tabel transaksi
- * di mockup (satu baris = satu nama barang + jumlah). */
-function flattenMasuk(docs: RawBarangMasuk[]): TransactionRow[] {
-  return docs.flatMap((doc) =>
-    (doc.items ?? []).map((item, idx) => ({
-      id: `bm-${doc.id}-${item.id ?? idx}`,
-      date: doc.tanggal,
-      code: doc.nomorPenerimaan,
-      type: 'Masuk' as const,
-      itemName: item.barang?.nama ?? `Barang #${item.barangId}`,
-      quantity: `${formatNumber(item.qty)} ${item.barang?.satuan?.nama ?? ''}`.trim(),
-      status: statusLabel(doc.status),
-    })),
-  );
-}
-
-function flattenKeluar(docs: RawBarangKeluar[]): TransactionRow[] {
-  return docs.flatMap((doc) =>
-    (doc.items ?? []).map((item, idx) => ({
-      id: `bk-${doc.id}-${item.id ?? idx}`,
-      date: doc.tanggal,
-      code: doc.nomorPengeluaran,
-      type: 'Keluar' as const,
-      itemName: item.barang?.nama ?? `Barang #${item.barangId}`,
-      quantity: `${formatNumber(item.qty)} ${item.barang?.satuan?.nama ?? ''}`.trim(),
-      status: statusLabel(doc.status),
-    })),
-  );
-}
-
-const transactionColumns: DataTableColumn<TransactionRow>[] = [
-  { key: 'date', header: 'Tanggal', render: (row) => formatDate(row.date) },
-  { key: 'code', header: 'Kode', render: (row) => row.code },
-  {
-    key: 'type',
-    header: 'Jenis',
-    render: (row) => <Badge label={row.type} variant={row.type === 'Masuk' ? 'info' : 'warning'} />,
-  },
-  { key: 'item', header: 'Nama Barang', render: (row) => row.itemName },
-  { key: 'quantity', header: 'Jumlah', render: (row) => row.quantity },
-  {
-    key: 'status',
-    header: 'Status',
-    render: (row) => <Badge label={row.status} variant={statusVariant(row.status)} />,
-  },
-];
 
 interface StaffDashboardBaseProps {
   readonly role: Extract<UserRole, 'super_admin' | 'admin'>;
 }
 
 export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX.Element {
-  const { user } = useAuth();
-  const { requestExport, dialog: exportDialog } = useExportFormat();
   const { data: summaryRaw, error: summaryError } = useSWR(
     'dashboard-summary',
     () => dashboardApi.summary(),
@@ -107,14 +28,6 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
     () => dashboardApi.trend(),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
-  const {
-    data: activities,
-    error: activitiesError,
-    isLoading: activitiesLoading,
-  } = useSWR<ActivityItem[]>('dashboard-activity', () => dashboardApi.activity(), {
-    revalidateOnFocus: false,
-    shouldRetryOnError: false,
-  });
 
   const stats: StatMetric[] | null =
     !summaryError && summaryRaw
@@ -140,56 +53,31 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
   );
   const deliveries = deliveriesResult?.data ?? [];
 
-  // Table List: gabungan 5 dokumen barang masuk + 5 dokumen barang keluar
-  // terbaru, dipecah per item baris. Read-only (lihat visibleActions di
-  // bawah) — backend tidak punya satu endpoint gabungan untuk resource ini,
-  // dan Add/Edit terpadu tidak masuk akal untuk dua jenis dokumen dengan
-  // field berbeda. Untuk tambah/ubah/hapus transaksi sungguhan, gunakan
-  // halaman Barang Masuk / Barang Keluar masing-masing.
-  const { data: goodsInResult, error: goodsInError, isLoading: goodsInLoading } = useSWR(
-    'dashboard-table-goods-in',
-    () => goodsInApi.list({ page: 1, pageSize: 5 }),
+  // "Perlu Perhatian": gantikan widget "Table List" lama (lihat catatan di
+  // AttentionPanel.tsx kenapa) — dua hal yang butuh tindakan admin hari
+  // ini, bukan cuma riwayat pasif.
+  const {
+    data: lowStockResult,
+    error: lowStockError,
+    isLoading: lowStockLoading,
+  } = useSWR(
+    'dashboard-low-stock',
+    () => itemsApi.list({ stok_menipis: 1, pageSize: 5 }),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
-  const { data: goodsOutResult, error: goodsOutError, isLoading: goodsOutLoading } = useSWR(
-    'dashboard-table-goods-out',
-    () => goodsOutApi.list({ page: 1, pageSize: 5 }),
+  const {
+    data: pendingPOResult,
+    error: pendingPOError,
+    isLoading: pendingPOLoading,
+  } = useSWR(
+    'dashboard-pending-po',
+    () => purchaseOrdersApi.list({ status: 'diajukan', pageSize: 5 }),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
-
-  const transactionRows: TransactionRow[] = [
-    ...flattenMasuk(goodsInResult?.data ?? []),
-    ...flattenKeluar(goodsOutResult?.data ?? []),
-  ].sort((a, b) => (a.date < b.date ? 1 : -1));
-
-  const TRANSACTION_EXPORT_COLUMNS = [
-    { header: 'Tanggal', accessor: (row: TransactionRow) => formatDate(row.date) },
-    { header: 'Kode', accessor: (row: TransactionRow) => row.code },
-    { header: 'Jenis', accessor: (row: TransactionRow) => row.type },
-    { header: 'Nama Barang', accessor: (row: TransactionRow) => row.itemName },
-    { header: 'Jumlah', accessor: (row: TransactionRow) => row.quantity },
-    { header: 'Status', accessor: (row: TransactionRow) => row.status },
-  ];
-  const TRANSACTION_PDF_META = {
-    title: 'Rekap Data Gudang — Transaksi Terbaru',
-    subtitle: 'Dashboard',
-    description: 'Gabungan transaksi barang masuk & keluar terbaru pada gudang, beserta jumlah dan status prosesnya.',
-  };
-
-  function handleExportTransactions(): void {
-    requestExport(transactionRows, TRANSACTION_EXPORT_COLUMNS, 'transaksi-terbaru', TRANSACTION_PDF_META);
-  }
-
-  function handlePrintTransactions(): void {
-    printRowsToPdf(transactionRows, TRANSACTION_EXPORT_COLUMNS, {
-      ...TRANSACTION_PDF_META,
-      generatedBy: user?.fullName,
-    });
-  }
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-[2fr_1fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
         <Reveal index={0}>
           <TrendChartCard
             title="Tren Barang Masuk &amp; Keluar"
@@ -201,35 +89,19 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
           />
         </Reveal>
         <Reveal index={1}>
-          {activitiesLoading ? (
-            <Card className="flex flex-col gap-4">
-              <h2 className="text-base font-semibold text-text">Aktivitas Terbaru</h2>
-              <p className="text-xs text-textMuted">Memuat...</p>
-            </Card>
-          ) : (
-            <RecentActivityCard items={activities ?? []} errorMessage={listErrorMessage(activitiesError)} />
-          )}
-        </Reveal>
-        <Reveal index={2}>
           <DeliveryTrackingCard deliveries={deliveries} errorMessage={listErrorMessage(deliveriesError)} />
         </Reveal>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
         <Reveal index={0}>
-          <DataTable
-            title="Table List"
-            description="Transaksi barang masuk & keluar terbaru"
-            columns={transactionColumns}
-            rows={transactionRows}
-            getRowId={(row) => row.id}
-            isLoading={goodsInLoading || goodsOutLoading}
-            errorMessage={listErrorMessage(goodsInError ?? goodsOutError)}
-            visibleActions={['export', 'print']}
-            onRowAction={(action) => {
-              if (action === 'export') handleExportTransactions();
-              if (action === 'print') handlePrintTransactions();
-            }}
+          <AttentionPanel
+            lowStockItems={lowStockResult?.data ?? []}
+            lowStockLoading={lowStockLoading}
+            lowStockError={listErrorMessage(lowStockError)}
+            pendingPOs={pendingPOResult?.data ?? []}
+            pendingPOLoading={pendingPOLoading}
+            pendingPOError={listErrorMessage(pendingPOError)}
           />
         </Reveal>
         <div className="flex flex-col gap-4">
@@ -327,7 +199,6 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
           ))
         )}
       </div>
-      {exportDialog}
     </div>
   );
 }

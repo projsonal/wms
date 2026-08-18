@@ -13,7 +13,7 @@ import { Input, Select, NumberField } from '@/component/ui/FormControls';
 import { StatsRow } from '@/component/ui/StatsRow';
 import { useAuth } from '@/auth/AuthContext';
 import { usePermissions } from '@/lib/hooks/usePermissions';
-import { goodsOutApi, itemsApi, kategoriApi, warehousesApi, type KategoriRaw } from '@/lib/api/modules';
+import { goodsOutApi, itemsApi, kategoriApi, warehousesApi, rakApi, type KategoriRaw } from '@/lib/api/modules';
 import { HttpError } from '@/lib/api/client';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { formatDate } from '@/lib/utils/format';
@@ -28,6 +28,13 @@ interface ItemRow {
    * soal kenapa ini WAJIB, bukan cuma soal gaya (SonarQube S6479). */
   key: string;
   barangId: string;
+  /** Opsional — rak ASAL pengambilan barang, mengurangi Rak.Terisi rak itu
+   * sebesar qty saat dokumen diselesaikan (lihat catatan RakID di
+   * GoodsIn.tsx, konsepnya sama tapi arah sebaliknya). Rak di sini TIDAK
+   * dikaitkan ke SKU tertentu (lihat model.Rak backend — kapasitas/terisi
+   * murni angka unit generik per rak, bukan per barang), jadi operator
+   * cukup pilih rak fisik tempat dia mengambil barang, apa pun jenisnya. */
+  rakId: string;
   qty: number;
 }
 
@@ -37,7 +44,7 @@ function nextRowKey(): string {
   return `row-${rowKeyCounter}`;
 }
 
-const EMPTY_ITEM_ROW: Omit<ItemRow, 'key'> = { barangId: '', qty: 1 };
+const EMPTY_ITEM_ROW: Omit<ItemRow, 'key'> = { barangId: '', rakId: '', qty: 1 };
 
 function friendlyError(err: unknown, fallback: string): string {
   if (err instanceof HttpError) {
@@ -71,6 +78,22 @@ export function BarangKeluarContent(): React.JSX.Element {
   const [keperluan, setKeperluan] = useState('');
   const [penerima, setPenerima] = useState('');
   const [itemRows, setItemRows] = useState<ItemRow[]>([{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
+
+  // Sama pola dengan BarangMasuk.tsx: daftar rak KHUSUS gudang asal yang
+  // dipilih, reset tiap kali gudang berganti (lihat handleGudangChange).
+  const { data: rakListResult } = useSWR(
+    gudangId ? ['racks-for-goods-out', gudangId] : null,
+    () => rakApi.list(Number(gudangId), { pageSize: 200 }),
+  );
+  const rakOptions = (rakListResult?.data ?? []).map((r) => ({
+    label: `${r.kodeRak} (${r.terisi}/${r.kapasitas} unit)`,
+    value: String(r.id),
+  }));
+
+  function handleGudangChange(nextGudangId: string): void {
+    setGudangId(nextGudangId);
+    setItemRows((prev) => prev.map((row) => ({ ...row, rakId: '' })));
+  }
 
   function openCreateModal(): void {
     setGudangId('');
@@ -106,7 +129,11 @@ export function BarangKeluarContent(): React.JSX.Element {
         tanggal,
         keperluan,
         penerima,
-        items: items.map((r) => ({ barang_id: Number(r.barangId), qty: r.qty })),
+        items: items.map((r) => ({
+          barang_id: Number(r.barangId),
+          rak_id: r.rakId ? Number(r.rakId) : undefined,
+          qty: r.qty,
+        })),
       });
       toast.success('Dokumen barang keluar berhasil dibuat (status: draft).');
       setIsModalOpen(false);
@@ -326,7 +353,7 @@ export function BarangKeluarContent(): React.JSX.Element {
           <Select
             label="Gudang Asal"
             value={gudangId}
-            onChange={(e) => setGudangId(e.target.value)}
+            onChange={(e) => handleGudangChange(e.target.value)}
             placeholder="Pilih gudang"
             options={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
           />
@@ -369,6 +396,14 @@ export function BarangKeluarContent(): React.JSX.Element {
                 onChange={(e) => updateItemRow(index, { barangId: e.target.value })}
                 placeholder="Pilih barang"
                 options={(barangList?.data ?? []).map((b) => ({ label: `${b.sku} — ${b.name}`, value: b.id }))}
+              />
+              <Select
+                label="Ambil dari Rak (opsional)"
+                value={row.rakId}
+                onChange={(e) => updateItemRow(index, { rakId: e.target.value })}
+                placeholder={gudangId ? 'Tidak diambil dari rak tertentu' : 'Pilih gudang asal dulu'}
+                options={rakOptions}
+                disabled={!gudangId}
               />
               <NumberField
                 label="Qty"

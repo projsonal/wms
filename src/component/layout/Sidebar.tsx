@@ -9,6 +9,8 @@ import { Menu, X, ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
 import { getNavGroupsForRole, ROLE_LABEL } from '@/auth/roles';
 import { useAuth } from '@/auth/AuthContext';
 import { useSidebarState } from '@/component/layout/SidebarContext';
+import { useTranslations } from '@/lib/i18n/translations';
+import { useAuthedImage } from '@/lib/hooks/useAuthedImage';
 
 const EXPANDED_WIDTH = 256;
 const COLLAPSED_WIDTH = 76;
@@ -26,9 +28,10 @@ function SidebarBody({
 }): React.JSX.Element {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const t = useTranslations();
   const role = user?.role ?? 'karyawan';
   const navGroups = getNavGroupsForRole(role);
-  const initial = (user?.fullName ?? 'U').charAt(0).toUpperCase();
+  const avatarUrl = useAuthedImage(user?.avatarUrl);
 
   return (
     <div className="flex h-full flex-col justify-between overflow-y-auto overflow-x-hidden px-3 py-6">
@@ -122,7 +125,7 @@ function SidebarBody({
             )}
           >
             <Settings className="h-4 w-4 shrink-0" />
-            {collapsed ? null : <span className="truncate">Settings</span>}
+            {collapsed ? null : <span className="truncate">{t('sidebar.settings')}</span>}
           </Link>
         </div>
       </div>
@@ -136,34 +139,60 @@ function SidebarBody({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
       >
-        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-bold">
-          <span className="absolute inset-0 rounded-full animate-wms-glow-pulse" />
-          <span className="relative">{initial}</span>
-        </span>
+        {/* Klik avatar/nama -> Settings (sama seperti link Settings di atas,
+            ditaruh di sini juga karena ini area yang biasa diklik user untuk
+            "buka pengaturan akun saya"). Tombol Logout di dalamnya SENGAJA
+            memanggil stopPropagation supaya klik Logout tidak ikut memicu
+            navigasi ke Settings. */}
+        <Link
+          href="/home/settings"
+          onClick={onNavigate}
+          title={collapsed ? t('sidebar.settings') : undefined}
+          className={clsx(
+            'flex flex-1 items-center gap-3 rounded-lg text-left transition-opacity hover:opacity-80',
+            collapsed && 'flex-col gap-2',
+          )}
+        >
+          <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutralBg">
+            <span className="absolute inset-0 rounded-full animate-wms-glow-pulse" />
+            {/* eslint-disable-next-line @next/next/no-img-element -- avatarUrl dari domain backend terpisah; default-avatar.png aset statis lokal, keduanya butuh <img> polos */}
+            <img
+              src={avatarUrl ?? '/assets/default-avatar.png'}
+              alt=""
+              className="relative h-full w-full rounded-full object-cover"
+            />
+          </span>
+          {collapsed ? null : (
+            <span className="flex-1 truncate text-sm font-semibold">{user?.fullName ?? 'Pengguna'}</span>
+          )}
+        </Link>
         {collapsed ? (
           <motion.button
             type="button"
-            onClick={logout}
+            onClick={(event) => {
+              event.stopPropagation();
+              logout();
+            }}
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
-            title="Logout"
+            title={t('sidebar.logout')}
             className="rounded-full border border-white/30 px-2 py-1 text-[10px] text-white/80 hover:bg-white/10"
           >
             Keluar
           </motion.button>
         ) : (
-          <div className="flex flex-1 flex-col gap-1">
-            <span className="truncate text-sm font-semibold">{user?.fullName ?? 'Pengguna'}</span>
-            <motion.button
-              type="button"
-              onClick={logout}
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.96 }}
-              className="rounded-full border border-white/30 px-3 py-1 text-left text-xs text-white/80 hover:bg-white/10"
-            >
-              Logout
-            </motion.button>
-          </div>
+          <motion.button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              logout();
+            }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            className="shrink-0 rounded-full border border-white/30 px-3 py-1 text-left text-xs text-white/80 hover:bg-white/10"
+          >
+            {t('sidebar.logout')}
+          </motion.button>
         )}
       </motion.div>
     </div>

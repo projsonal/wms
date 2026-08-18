@@ -5,6 +5,7 @@ export default function Page(): React.JSX.Element {
     <ReportPageTemplate
       title="Laporan Barang Retur"
       breadcrumb="Laporan / Laporan Barang Retur"
+      reportType="Barang Retur"
     />
   );
 }

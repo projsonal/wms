@@ -1,7 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import useSWR from 'swr';
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageShell } from '@/component/layout/PageShell';
+import { Card } from '@/component/ui/Card';
 import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { ReportDownloadButton } from '@/component/laporan/ReportDownloadButton';
 import { StatsRow } from '@/component/ui/StatsRow';
@@ -9,16 +12,20 @@ import { useAuth } from '@/auth/AuthContext';
 import { laporanApi } from '@/lib/api/modules';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 
+type Granularitas = 'harian' | 'bulanan' | 'tahunan';
+
 interface ReportPageTemplateProps {
   title: string;
   breadcrumb: string;
   /** Nilai `tipe` yang dikenali backend (GET /laporan/export|preview?tipe=...) —
    * lihat reportTitles di internal/controller/laporan/laporan_controller.go.
-   * Backend HANYA punya 5 tipe: "Stok Barang", "Barng Masuk" (typo asli
-   * di backend, sengaja disamakan persis), "Barang Keluar",
-   * "Purchase Order", "Stock Opname". Kalau undefined, halaman menampilkan
-   * pesan jujur "belum ada data" daripada data karangan. */
+   * Kalau undefined, halaman menampilkan pesan jujur "belum ada data"
+   * daripada data karangan. */
   reportType?: string;
+  /** false untuk laporan yang chart-nya BUKAN deret waktu (mis. Laporan
+   * Stok Barang — snapshot top 10 stok, tidak ada sumbu harian/bulanan/
+   * tahunan yang masuk akal) — menyembunyikan selector granularitas. */
+  hasDateGranularity?: boolean;
 }
 
 /** Baris generik {header: value} — backend mengirim headers[]+rows[][]
@@ -34,11 +41,23 @@ function toGenericRows(headers: string[], rows: string[][]): Array<Record<string
   });
 }
 
-export function ReportPageTemplate({ title, breadcrumb, reportType }: ReportPageTemplateProps): React.JSX.Element {
+const GRANULARITAS_OPTIONS: { value: Granularitas; label: string }[] = [
+  { value: 'harian', label: 'Harian' },
+  { value: 'bulanan', label: 'Bulanan' },
+  { value: 'tahunan', label: 'Tahunan' },
+];
+
+export function ReportPageTemplate({
+  title,
+  breadcrumb,
+  reportType,
+  hasDateGranularity = true,
+}: ReportPageTemplateProps): React.JSX.Element {
   const { user } = useAuth();
+  const [granularitas, setGranularitas] = useState<Granularitas>('bulanan');
   const { data, isLoading } = useSWR(
-    reportType ? ['laporan-preview', reportType] : null,
-    () => laporanApi.preview(reportType as string),
+    reportType ? ['laporan-preview', reportType, hasDateGranularity ? granularitas : null] : null,
+    () => laporanApi.preview(reportType as string, undefined, undefined, hasDateGranularity ? granularitas : undefined),
   );
 
   const headers = data?.headers ?? [];
@@ -48,6 +67,14 @@ export function ReportPageTemplate({ title, breadcrumb, reportType }: ReportPage
     header: h,
     render: (row) => row[h] ?? '-',
   }));
+
+  // recharts butuh array-of-object, bukan {labels, values} paralel —
+  // digabung di sini SEKALI, bukan di render loop.
+  const chartRows =
+    data?.chart?.labels.map((label, i) => ({
+      label,
+      value: data.chart?.values[i] ?? 0,
+    })) ?? [];
 
   function handlePrint(): void {
     printRowsToPdf(
@@ -66,7 +93,7 @@ export function ReportPageTemplate({ title, breadcrumb, reportType }: ReportPage
     <PageShell
       title={title}
       breadcrumb={breadcrumb}
-      action={reportType ? <ReportDownloadButton reportType={reportType} /> : undefined}
+      action={reportType ? <ReportDownloadButton reportType={reportType} granularitas={hasDateGranularity ? granularitas : undefined} /> : undefined}
     >
       {reportType ? (
         <>
@@ -77,6 +104,52 @@ export function ReportPageTemplate({ title, breadcrumb, reportType }: ReportPage
               value: s.value,
             }))}
           />
+
+          {/* Analisa Data — chart disesuaikan otomatis per tipe laporan oleh
+              backend (deret waktu untuk laporan bertanggal, top-10 stok
+              untuk Laporan Stok Barang) — lihat internal/controller/laporan/chart.go. */}
+          <Card className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-semibold text-text">
+                Analisa Data{data?.chart?.title ? ` — ${data.chart.title}` : ''}
+              </h2>
+              {hasDateGranularity ? (
+                <div className="flex gap-1.5">
+                  {GRANULARITAS_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setGranularitas(opt.value)}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                        granularitas === opt.value ? 'bg-accent text-white' : 'text-textMuted hover:bg-surfaceAlt'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="h-64 w-full">
+              {isLoading ? (
+                <p className="flex h-full items-center justify-center text-xs text-textMuted">Memuat chart...</p>
+              ) : chartRows.length === 0 ? (
+                <p className="flex h-full items-center justify-center text-center text-xs text-textMuted">
+                  Belum ada data yang cukup untuk periode ini.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartRows} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a7b74' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 12, fill: '#8a7b74' }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #f0dad2', fontSize: 12 }} />
+                    <Bar dataKey="value" fill="#b3471f" radius={[4, 4, 0, 0]} isAnimationActive animationDuration={900} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </Card>
+
           <DataTable
             title="Rincian Laporan"
             description="Detail transaksi dari database, sesuai periode berjalan"

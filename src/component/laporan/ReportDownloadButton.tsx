@@ -11,6 +11,11 @@ export type ReportFormat = 'Excel' | 'PDF' | 'Docs';
 interface ReportDownloadButtonProps {
   /** Kode tipe laporan sesuai GET /laporan/tipe (mis. "stok-barang"). */
   reportType: string;
+  /** Diteruskan ke backend supaya chart yang disisipkan ke file unduhan
+   * (PDF gambar chart asli, Excel chart native) memakai granularitas
+   * YANG SAMA dengan yang sedang dilihat user di layar — bukan default
+   * bulanan tanpa peduli apa yang dipilih di UI. */
+  granularitas?: 'harian' | 'bulanan' | 'tahunan';
 }
 
 const FORMAT_OPTIONS: { format: ReportFormat; label: string; icon: typeof FileText }[] = [
@@ -24,7 +29,7 @@ const FORMAT_OPTIONS: { format: ReportFormat; label: string; icon: typeof FileTe
  * GET /laporan/export?tipe=&format= (internal/controller/laporan). Backend
  * mendukung Excel, PDF, dan Word (Docs) — lihat pkg/reportexport.
  */
-export function ReportDownloadButton({ reportType }: ReportDownloadButtonProps): React.JSX.Element {
+export function ReportDownloadButton({ reportType, granularitas }: ReportDownloadButtonProps): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [downloadingFormat, setDownloadingFormat] = useState<ReportFormat | null>(null);
 
@@ -32,7 +37,9 @@ export function ReportDownloadButton({ reportType }: ReportDownloadButtonProps):
     setIsOpen(false);
     setDownloadingFormat(format);
     try {
-      await downloadFile(`/laporan/export?tipe=${encodeURIComponent(reportType)}&format=${format}`);
+      const params = new URLSearchParams({ tipe: reportType, format });
+      if (granularitas) params.set('granularitas', granularitas);
+      await downloadFile(`/laporan/export?${params.toString()}`);
       toast.success(`Laporan berhasil diunduh (${format}).`);
     } catch (err) {
       toast.error(err instanceof HttpError ? err.message : 'Gagal mengunduh laporan, coba lagi.');

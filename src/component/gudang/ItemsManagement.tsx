@@ -197,7 +197,6 @@ export function ItemsManagementContent(): React.JSX.Element {
     { header: 'Stok Minimum', accessor: (r: Item) => r.minStock },
     { header: 'Harga Beli', accessor: (r: Item) => r.price },
     { header: 'Status', accessor: (r: Item) => r.status },
-    { header: 'Terakhir Update', accessor: (r: Item) => r.updatedAt },
   ];
   const ITEM_PDF_META = {
     title: 'Rekap Data Gudang — Kelola Barang',

@@ -1,14 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/component/ui/Button';
 import { Input, PasswordInput } from '@/component/ui/FormControls';
-import { CaptchaField } from '@/component/auth/CaptchaField';
+import { HumanCheckField } from '@/component/auth/HumanCheckField';
 import { authApi } from '@/lib/api/auth';
-import { captchaApi } from '@/lib/api/security';
 import { HttpError } from '@/lib/api/client';
 import { Icon } from "@iconify/react";
-import type { CaptchaChallenge } from '@/types';
 
 interface ForgotPasswordStepProps {
   initialIdentifier?: string;
@@ -23,33 +21,10 @@ export function ForgotPasswordStep({
   const [identifier, setIdentifier] = useState(initialIdentifier);
   const [newPassword, setNewPassword] = useState('');
   const [newPasswordConfirmation, setNewPasswordConfirmation] = useState('');
-  const [challenge, setChallenge] = useState<CaptchaChallenge | null>(null);
-  const [captchaAnswer, setCaptchaAnswer] = useState('');
-  const [isRefreshingCaptcha, setIsRefreshingCaptcha] = useState(false);
+  const [humanCheckToken, setHumanCheckToken] = useState<string | null>(null);
+  const [resetKey, setResetKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  async function loadCaptcha(): Promise<void> {
-    setIsRefreshingCaptcha(true);
-    try {
-      const c = await captchaApi.generate();
-      setChallenge(c);
-      setCaptchaAnswer('');
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof HttpError
-          ? err.message
-          : 'Gagal memuat captcha...',
-      );
-    } finally {
-      setIsRefreshingCaptcha(false);
-    }
-  }
-
-  useEffect(() => {
-    loadCaptcha();
-  }, []);
 
   async function handleSubmit(): Promise<void> {
     setError(null);
@@ -65,19 +40,23 @@ export function ForgotPasswordStep({
       setError('Konfirmasi password tidak sama.');
       return;
     }
+    if (!humanCheckToken) {
+      setError('Tunggu proses verifikasi "kamu bukan robot" selesai dulu.');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await authApi.resetPassword({
         identifier: identifier.trim(),
         newPassword,
         newPasswordConfirmation,
-        captchaToken: challenge?.captchaToken ?? '',
-        captchaAnswer,
+        humanCheckToken,
       });
       setPhase('done');
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Gagal menyimpan password baru, coba lagi.');
-      await loadCaptcha();
+      setHumanCheckToken(null);
+      setResetKey((k) => k + 1);
     } finally {
       setIsSubmitting(false);
     }
@@ -89,8 +68,8 @@ export function ForgotPasswordStep({
         <div>
           <h2 className="text-base font-semibold text-text">Lupa Password</h2>
           <p className="mt-1 text-xs text-textMuted">
-            Masukkan password baru. Selesaikan captcha untuk
-            memverifikasi bahwa kamu bukan robot.
+            Masukkan password baru. Selesaikan verifikasi di bawah untuk
+            memastikan bahwa kamu bukan robot.
           </p>
         </div>
         <Input
@@ -115,15 +94,13 @@ export function ForgotPasswordStep({
           value={newPasswordConfirmation}
           onChange={(event) => setNewPasswordConfirmation(event.target.value)}
         />
-        <CaptchaField
-          challenge={challenge}
-          answer={captchaAnswer}
-          onAnswerChange={setCaptchaAnswer}
-          onRefresh={loadCaptcha}
-          isRefreshing={isRefreshingCaptcha}
+        <HumanCheckField
+          resetKey={resetKey}
+          onVerified={setHumanCheckToken}
+          onReset={() => setHumanCheckToken(null)}
         />
         {error ? <p className="text-xs text-dangerText">{error}</p> : null}
-        <Button onClick={handleSubmit} loading={isSubmitting}>
+        <Button onClick={handleSubmit} loading={isSubmitting} disabled={!humanCheckToken}>
           Ganti Password
         </Button>
         <button type="button" onClick={onBackToLogin} className="text-xs text-textMuted underline">

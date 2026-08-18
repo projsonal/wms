@@ -13,7 +13,7 @@ import { Input, Select, NumberField, CurrencyField } from '@/component/ui/FormCo
 import { StatsRow } from '@/component/ui/StatsRow';
 import { useAuth } from '@/auth/AuthContext';
 import { usePermissions } from '@/lib/hooks/usePermissions';
-import { goodsInApi, itemsApi, kategoriApi, warehousesApi, type KategoriRaw } from '@/lib/api/modules';
+import { goodsInApi, itemsApi, kategoriApi, warehousesApi, rakApi, type KategoriRaw } from '@/lib/api/modules';
 import { HttpError } from '@/lib/api/client';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { formatDate } from '@/lib/utils/format';
@@ -32,6 +32,13 @@ interface ItemRow {
    * karena alasan ini: S6479). */
   key: string;
   barangId: string;
+  /** Opsional — TANPA sensor IoT, ini satu-satunya cara "Terisi" pada rak
+   * (lihat WarehouseManagement.tsx) beranjak dari 0: operator memilih rak
+   * tujuan penempatan manual di sini, backend menambah Rak.Terisi sebesar
+   * qty begitu dokumen ini diselesaikan (lihat catatan RakID di
+   * internal/model/barang_masuk.go). Kosong = barang dicatat masuk tanpa
+   * penempatan rak spesifik (rak tetap tercatat kosong). */
+  rakId: string;
   qty: number;
   hargaSatuan: number;
 }
@@ -42,7 +49,7 @@ function nextRowKey(): string {
   return `row-${rowKeyCounter}`;
 }
 
-const EMPTY_ITEM_ROW: Omit<ItemRow, 'key'> = { barangId: '', qty: 1, hargaSatuan: 0 };
+const EMPTY_ITEM_ROW: Omit<ItemRow, 'key'> = { barangId: '', rakId: '', qty: 1, hargaSatuan: 0 };
 
 function friendlyError(err: unknown, fallback: string): string {
   if (err instanceof HttpError) {
@@ -75,6 +82,27 @@ export function BarangMasukContent(): React.JSX.Element {
   const [tanggal, setTanggal] = useState('');
   const [catatan, setCatatan] = useState('');
   const [itemRows, setItemRows] = useState<ItemRow[]>([{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
+
+  // Daftar rak KHUSUS gudang yang dipilih di atas (rak milik gudang lain
+  // tidak relevan/tidak valid dipilih di sini). Di-fetch ulang tiap
+  // gudangId berganti; lihat handleGudangChange di bawah untuk kenapa
+  // rakId tiap baris ikut direset saat itu terjadi.
+  const { data: rakListResult } = useSWR(
+    gudangId ? ['racks-for-goods-in', gudangId] : null,
+    () => rakApi.list(Number(gudangId), { pageSize: 200 }),
+  );
+  const rakOptions = (rakListResult?.data ?? []).map((r) => ({
+    label: `${r.kodeRak} (${r.terisi}/${r.kapasitas} unit)`,
+    value: String(r.id),
+  }));
+
+  function handleGudangChange(nextGudangId: string): void {
+    setGudangId(nextGudangId);
+    // Rak yang sudah dipilih di tiap baris jadi tidak valid begitu gudang
+    // tujuan berganti (rak terikat ke SATU gudang) — reset supaya tidak
+    // ada baris yang diam-diam mengirim rak_id milik gudang yang salah.
+    setItemRows((prev) => prev.map((row) => ({ ...row, rakId: '' })));
+  }
 
   function openCreateModal(): void {
     setGudangId('');
@@ -110,6 +138,7 @@ export function BarangMasukContent(): React.JSX.Element {
         catatan,
         items: items.map((r) => ({
           barang_id: Number(r.barangId),
+          rak_id: r.rakId ? Number(r.rakId) : undefined,
           qty: r.qty,
           harga_satuan: r.hargaSatuan,
         })),
@@ -333,7 +362,7 @@ export function BarangMasukContent(): React.JSX.Element {
           <Select
             label="Gudang Tujuan"
             value={gudangId}
-            onChange={(e) => setGudangId(e.target.value)}
+            onChange={(e) => handleGudangChange(e.target.value)}
             placeholder="Pilih gudang"
             options={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
           />
@@ -375,6 +404,14 @@ export function BarangMasukContent(): React.JSX.Element {
                 onChange={(e) => updateItemRow(index, { barangId: e.target.value })}
                 placeholder="Pilih barang"
                 options={(barangList?.data ?? []).map((b) => ({ label: `${b.sku} — ${b.name}`, value: b.id }))}
+              />
+              <Select
+                label="Tempatkan di Rak (opsional)"
+                value={row.rakId}
+                onChange={(e) => updateItemRow(index, { rakId: e.target.value })}
+                placeholder={gudangId ? 'Tidak ditempatkan ke rak tertentu' : 'Pilih gudang tujuan dulu'}
+                options={rakOptions}
+                disabled={!gudangId}
               />
               <div className="grid grid-cols-2 gap-3">
                 <NumberField

@@ -29,6 +29,7 @@ export interface AuthUser {
   roleId: number;
   role: UserRole;
   twoFactorEnabled: boolean;
+  avatarUrl?: string;
 }
 
 export interface LoginPayload {
@@ -312,6 +313,16 @@ export interface Asset {
   longitude?: number;
   status: AssetStatus;
   keterangan?: string;
+  /** Alamat IP perangkat (opsional) — dipakai fitur "Cek Ping" konektivitas. */
+  ipAddress?: string;
+  pingStatus?: 'online' | 'offline' | 'unknown';
+  lastPingAt?: string;
+  /** Aset induk dalam hierarki jaringan FTTH (mis. ODP ini anak dari ODC mana). */
+  parentAssetId?: string;
+  /** Total slot port fisik (relevan untuk odc/odp/olt) — 0 berarti tidak punya port. */
+  jumlahPort?: number;
+  /** Jumlah port berstatus "terisi" — dipakai badge "X dari Y port". */
+  portTerisi?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -324,6 +335,8 @@ export interface BarangRusak {
   labelBarang: string;
   namaBarang: string;
   keterangan?: string;
+  /** Foto bukti kondisi fisik barang rusak (opsional) — path relatif dari backend, resolve lewat resolveUploadUrl(). */
+  fotoUrl?: string;
   jenisBarang?: 'retur' | 'rusak' | '';
   status: BarangRusakStatus;
   dilaporkanOleh: string;

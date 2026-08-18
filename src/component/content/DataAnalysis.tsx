@@ -7,8 +7,14 @@ import { StatsRow } from '@/component/ui/StatsRow';
 import { DonutChartCard } from '@/component/charts/DonutChartCard';
 import { dashboardApi } from '@/lib/api/modules';
 import { formatNumber } from '@/lib/utils/format';
+import { JENIS_ASET_META, ASSET_STATUS_META } from '@/lib/utils/status';
 
 const DONUT_COLORS = ['#b3471f', '#3454c7', '#c9791e', '#8a7b74', '#2f8132', '#6b5d56'];
+const STATUS_DONUT_COLORS: Record<string, string> = {
+  aktif: '#2f8132',
+  rusak: '#c0392b',
+  nonaktif: '#8a7b74',
+};
 
 function RankingCard({
   title,
@@ -43,6 +49,40 @@ function RankingCard({
   );
 }
 
+/** Daftar peringkat sederhana (bukan donut) — dipakai untuk "Aset per
+ * Gudang" karena jumlah gudang bisa banyak & label gudang bisa panjang,
+ * kurang cocok jadi donut chart yang legend-nya terbatas ruang. */
+function BreakdownList({
+  title,
+  items,
+  emptyMessage,
+}: {
+  title: string;
+  items: Array<{ label: string; value: number }>;
+  emptyMessage: string;
+}): React.JSX.Element {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  return (
+    <Card className="flex flex-col gap-4">
+      <h2 className="text-base font-semibold text-text">{title}</h2>
+      {items.length === 0 ? (
+        <p className="text-xs text-textMuted">{emptyMessage}</p>
+      ) : (
+        <ul className="flex flex-col gap-2.5">
+          {items.map((item) => (
+            <li key={item.label} className="flex items-center gap-3 text-sm">
+              <span className="flex-1 truncate text-text">{item.label}</span>
+              <span className="w-24 text-right text-xs text-textMuted">
+                {formatNumber(item.value)} ({total > 0 ? Math.round((item.value / total) * 100) : 0}%)
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 export function DataAnalysisContent(): React.JSX.Element {
   const { data, isLoading } = useSWR('dashboard-analisa', () => dashboardApi.analisa());
 
@@ -50,6 +90,18 @@ export function DataAnalysisContent(): React.JSX.Element {
     label: k.label,
     value: k.value,
     color: DONUT_COLORS[i % DONUT_COLORS.length],
+  }));
+
+  const asetJenisData = (data?.asetPerJenis ?? []).map((a, i) => ({
+    label: JENIS_ASET_META[a.label]?.label ?? a.label,
+    value: a.value,
+    color: DONUT_COLORS[i % DONUT_COLORS.length],
+  }));
+
+  const asetStatusData = (data?.asetPerStatus ?? []).map((a) => ({
+    label: ASSET_STATUS_META[a.label as keyof typeof ASSET_STATUS_META]?.label ?? a.label,
+    value: a.value,
+    color: STATUS_DONUT_COLORS[a.label] ?? '#8a7b74',
   }));
 
   return (
@@ -78,6 +130,42 @@ export function DataAnalysisContent(): React.JSX.Element {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <RankingCard title="Barang Paling Sering Direstok" items={data?.topRestocked ?? []} unit="unit masuk" />
           <RankingCard title="Barang Paling Sering Keluar" items={data?.topKeluar ?? []} unit="unit keluar" />
+        </div>
+      </div>
+
+      {/* --- Analisa Aset Perusahaan --- terpisah dari analisa barang di
+          atas karena memang dua jenis data yang beda sifat: barang = stok
+          consumable yang keluar-masuk terus, aset = infrastruktur
+          (tiang/ODC/ONT/ODP/OLT/transportasi) yang dipasang & dipantau
+          kondisinya, lihat menu Manajemen Aset Gudang. */}
+      <div className="mt-2">
+        <h2 className="mb-3 text-base font-semibold text-text">Analisa Aset Perusahaan</h2>
+        <StatsRow
+          stats={[
+            { id: 'total-aset', label: 'Total Aset', value: isLoading ? '-' : formatNumber(data?.totalAset ?? 0) },
+            {
+              id: 'aset-rusak',
+              label: 'Aset Berstatus Rusak',
+              value: isLoading ? '-' : formatNumber(data?.asetRusak ?? 0),
+            },
+          ]}
+        />
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <DonutChartCard
+            title="Komposisi Jenis Aset"
+            subtitle="Tiang / ODC / ONT / ODP / OLT / Transportasi"
+            data={asetJenisData}
+          />
+          <DonutChartCard
+            title="Kondisi Aset"
+            subtitle="Aktif / Rusak / Nonaktif"
+            data={asetStatusData}
+          />
+          <BreakdownList
+            title="Aset per Gudang"
+            items={data?.asetPerGudang ?? []}
+            emptyMessage="Belum ada aset yang tercatat di gudang mana pun."
+          />
         </div>
       </div>
     </PageShell>

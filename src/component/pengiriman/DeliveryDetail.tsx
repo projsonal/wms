@@ -84,12 +84,20 @@ function DeliveryListSidebar({ activeId }: { activeId: string }): React.JSX.Elem
   );
 }
 
-function StatCards({ delivery }: { delivery: Delivery }): React.JSX.Element {
+function StatCards({ delivery, liveDistanceKm }: { delivery: Delivery; liveDistanceKm: number | null }): React.JSX.Element {
   const weight = totalWeightGram(delivery.items);
+  // Prioritaskan jarak hasil hitung rute jalan sungguhan (OSRM, lihat
+  // onRouteComputed di RouteTrackingMap) kalau sudah ada — itu angka yang
+  // benar-benar mengikuti jalan raya. delivery.distanceKm dari backend
+  // cuma dipakai sebagai fallback SEBELUM rute selesai dihitung (biasanya
+  // 0/belum terisi, itu sebabnya sebelumnya kartu ini selalu kelihatan
+  // "0 km" walau peta rute sudah tergambar — dua angka itu sebelumnya
+  // tidak pernah disambungkan satu sama lain).
+  const distanceLabel = liveDistanceKm !== null ? liveDistanceKm.toFixed(1) : delivery.distanceKm;
   return (
     <div className="grid grid-cols-3 gap-3">
       <Card className="p-4 text-center">
-        <p className="text-xl font-bold text-text">{delivery.distanceKm} km</p>
+        <p className="text-xl font-bold text-text">{distanceLabel} km</p>
         <p className="text-[10px] uppercase tracking-wide text-textMuted">Jarak Tempuh</p>
       </Card>
       <Card className="p-4 text-center">
@@ -187,6 +195,9 @@ export function DeliveryDetailContent(): React.JSX.Element {
   const confirm = useConfirm();
   const isCourierRole = user?.role === 'karyawan';
   const [isCompleting, setIsCompleting] = useState(false);
+  // Diisi lewat callback onRouteComputed dari RouteTrackingMap begitu rute
+  // jalan sungguhan (OSRM) berhasil dihitung -- lihat catatan di StatCards.
+  const [liveDistanceKm, setLiveDistanceKm] = useState<number | null>(null);
 
   const { data: delivery, isLoading, error, mutate } = useSWR(
     params.id ? ['delivery-detail', params.id] : null,
@@ -272,6 +283,8 @@ export function DeliveryDetailContent(): React.JSX.Element {
                   : { lat: delivery.destLatitude, lng: delivery.destLongitude }
               }
               fallbackCenter={FALLBACK_CENTER}
+              isDelivered={delivery.status === 'terkirim'}
+              onRouteComputed={(route) => setLiveDistanceKm(route.distanceKm)}
             />
             {isCourierRole ? (
               <div className="mt-2">
@@ -280,7 +293,7 @@ export function DeliveryDetailContent(): React.JSX.Element {
             ) : null}
           </div>
 
-          <StatCards delivery={delivery} />
+          <StatCards delivery={delivery} liveDistanceKm={liveDistanceKm} />
           <CourierCard delivery={delivery} />
           <ItemsAndActions delivery={delivery} onComplete={handleComplete} isCompleting={isCompleting} />
         </div>

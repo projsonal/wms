@@ -22,9 +22,18 @@ interface ShareLocationButtonProps {
  */
 export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): React.JSX.Element {
   const [isSharing, setIsSharing] = useState(false);
+  const [isRequesting, setIsRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const lastSentAtRef = useRef(0);
+  // Penanda "browser SUDAH benar-benar mengonfirmasi izin lokasi & kasih
+  // posisi valid" — beda dari sekadar "watchPosition() sudah dipanggil".
+  // watchPosition() ASYNC: memanggilnya TIDAK berarti izin otomatis
+  // diberikan. Dipakai supaya toast sukses & setIsSharing(true) baru
+  // terjadi SEKALI, tepat saat posisi pertama benar-benar diterima —
+  // bukan langsung setelah watchPosition() dipanggil (lihat bug lama di
+  // bawah).
+  const hasConfirmedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -39,6 +48,7 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    setIsRequesting(false);
     setIsSharing(false);
   }
 
@@ -48,6 +58,8 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
       return;
     }
     setError(null);
+    setIsRequesting(true);
+    hasConfirmedRef.current = false;
 
     // Penggunaan Geolocation API di sini SENGAJA dan perlu (bukan
     // dipasang diam-diam): tombol ini eksplisit diberi label "Bagikan
@@ -61,6 +73,21 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
     // eslint-disable-next-line sonarjs/no-intrusive-permissions
     const id = navigator.geolocation.watchPosition(
       (pos) => {
+        // BUG SEBELUMNYA: toast "berhasil dibagikan" & setIsSharing(true)
+        // dipanggil LANGSUNG setelah watchPosition() diminta, padahal izin
+        // browser belum tentu disetujui saat itu (async) — kalau ternyata
+        // ditolak, toast "berhasil" sempat tampil sepersekian detik lalu
+        // langsung dibarengi pesan "Izin lokasi ditolak" di bawahnya,
+        // membingungkan (persis yang terlihat di screenshot). Sekarang
+        // toast & status "aktif" HANYA muncul di sini, di callback SUKSES
+        // watchPosition — artinya browser benar-benar sudah kasih posisi
+        // valid, bukan tebakan optimis.
+        if (!hasConfirmedRef.current) {
+          hasConfirmedRef.current = true;
+          setIsRequesting(false);
+          setIsSharing(true);
+          toast.success('Lokasi kamu sekarang dibagikan secara real-time.');
+        }
         const now = Date.now();
         // Throttle pengiriman ke server (browser bisa memicu callback ini
         // jauh lebih sering dari SEND_INTERVAL_MS) — cukup kirim satu kali
@@ -81,6 +108,7 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
           });
       },
       (geoError) => {
+        setIsRequesting(false);
         setError(
           geoError.code === geoError.PERMISSION_DENIED
             ? 'Izin lokasi ditolak — aktifkan lewat pengaturan browser/HP untuk bagikan lokasi.'
@@ -91,8 +119,6 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
     );
     watchIdRef.current = id;
-    setIsSharing(true);
-    toast.success('Lokasi kamu sekarang dibagikan secara real-time.');
   }
 
   return (
@@ -100,9 +126,13 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
       <Button
         variant={isSharing ? 'danger' : 'primary'}
         onClick={isSharing ? stopSharing : startSharing}
+        disabled={isRequesting}
       >
         {isSharing ? <NavigationOff className="h-4 w-4" /> : <Navigation className="h-4 w-4" />}
-        {isSharing ? 'Berhenti Bagikan Lokasi' : 'Bagikan Lokasi Saya'}
+        {(() => {
+          if (isRequesting) return 'Meminta izin lokasi...';
+          return isSharing ? 'Berhenti Bagikan Lokasi' : 'Bagikan Lokasi Saya';
+        })()}
       </Button>
       {error ? <p className="text-xs text-dangerText">{error}</p> : null}
     </div>

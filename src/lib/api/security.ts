@@ -34,10 +34,23 @@ export const securityApi = {
 };
 
 /** GET /captcha — soal captcha terpisah yang dipakai khusus di form /register
- * & /forgot-password. skipBotToken: true karena endpoint ini sendiri yang
- * membuat soal captcha (bukan yang butuh diverifikasi), dan supaya error
- * asli dari endpoint ini (mis. captcha gagal dibuat di server) tidak salah
- * tertangkap sebagai "perlu bot-check lagi" oleh apiClient. */
+ * (lihat catatan RegisterRequest backend — form Register TETAP pakai captcha
+ * gambar, cuma Lupa Password & Ubah Kata Sandi yang beralih ke humancheck,
+ * lihat humanCheckApi di bawah). skipBotToken: true karena endpoint ini
+ * sendiri yang membuat soal captcha (bukan yang butuh diverifikasi), dan
+ * supaya error asli dari endpoint ini (mis. captcha gagal dibuat di server)
+ * tidak salah tertangkap sebagai "perlu bot-check lagi" oleh apiClient. */
 export const captchaApi = {
   generate: () => apiClient.get<CaptchaChallenge>('/captcha', { skipBotToken: true }),
+};
+
+/** GET /human-check — token verifikasi "verify you are human" ala Cloudflare
+ * Turnstile (lihat pkg/humancheck backend), dipakai form Lupa Password &
+ * Ubah Kata Sandi (lihat HumanCheckField.tsx) sebagai pengganti captcha
+ * gambar. Token harus di-issue lebih dulu, lalu dikirim balik minimal
+ * HUMANCHECK_MIN_DELAY_SECONDS setelah diterima (anti-submit-instan-bot),
+ * dan cuma bisa dipakai sekali sebelum kedaluwarsa. skipBotToken: true
+ * dengan alasan yang sama seperti captchaApi di atas. */
+export const humanCheckApi = {
+  issue: () => apiClient.get<{ humanCheckToken: string }>('/human-check', { skipBotToken: true }),
 };

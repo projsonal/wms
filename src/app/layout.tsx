@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import { Inter, IBM_Plex_Sans, Plus_Jakarta_Sans } from 'next/font/google';
+import { Inter } from 'next/font/google';
 import { AuthProvider } from '@/auth/AuthContext';
 import { ConfirmDialogProvider } from '@/component/ui/ConfirmDialog';
 import { PreferencesProvider } from '@/component/preferences/PreferencesContext';
@@ -8,24 +8,12 @@ import { VersionWatcher } from '@/component/system/VersionWatcher';
 import { Toaster } from '@/component/ui/shadcn/sonner';
 import './globals.css';
 
-// 3 font yang tersedia lewat Settings -> Tampilan -> Font Aplikasi (lihat
-// PreferencesContext.tsx). next/font/google men-download & self-host font
-// ini saat build (bukan lewat Google Fonts CDN saat runtime), jadi tidak
-// ada request eksternal tambahan / FOUC. Masing-masing diekspos sebagai
-// CSS variable, lalu --font-app (dipakai @theme di globals.css) tinggal
-// menunjuk ke salah satunya sesuai pilihan user.
+// Font aplikasi TIDAK lagi bisa dipilih user (opsi "Font Aplikasi" di
+// Settings > Tampilan sudah dihapus) — Inter dipakai tetap di seluruh
+// halaman. next/font/google men-download & self-host font ini saat build
+// (bukan lewat Google Fonts CDN saat runtime), jadi tidak ada request
+// eksternal tambahan / FOUC.
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
-const ibmPlexSans = IBM_Plex_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-ibm-plex-sans',
-  display: 'swap',
-});
-const plusJakartaSans = Plus_Jakarta_Sans({
-  subsets: ['latin'],
-  variable: '--font-plus-jakarta-sans',
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   title: 'WMS-RSD',
@@ -57,14 +45,28 @@ const applyStoredPreferencesScript = `
   try {
     var theme = localStorage.getItem('wms_theme');
     if (theme === 'dark') document.documentElement.classList.add('dark');
-    var fontVarMap = { inter: '--font-inter', 'ibm-plex-sans': '--font-ibm-plex-sans', 'plus-jakarta-sans': '--font-plus-jakarta-sans' };
-    var font = localStorage.getItem('wms_font');
-    if (font && fontVarMap[font]) {
-      document.documentElement.style.setProperty('--font-app', 'var(' + fontVarMap[font] + ')');
-    }
     var lang = localStorage.getItem('wms_language');
     if (lang) document.documentElement.setAttribute('lang', lang);
   } catch (e) {}
+})();
+`;
+
+const suppressExtensionHydrationNoiseScript = `
+(function () {
+  var patterns = ['bis_skin_checked', 'bis_register', '__processed_', 'cz-shortcut-listen', 'data-new-gr-c-s-check-loaded', 'data-gr-ext-installed', 'data-lt-installed', 'grammarly', 'colorzilla'];
+  var originalError = console.error;
+  console.error = function () {
+    var text = '';
+    for (var i = 0; i < arguments.length; i++) {
+      if (typeof arguments[i] === 'string') text += arguments[i] + ' ';
+    }
+    if (/hydrat/i.test(text)) {
+      for (var j = 0; j < patterns.length; j++) {
+        if (text.indexOf(patterns[j]) !== -1) return;
+      }
+    }
+    originalError.apply(console, arguments);
+  };
 })();
 `;
 
@@ -72,11 +74,11 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
   return (
     <html lang="id" suppressHydrationWarning>
       <head>
-        {/* eslint-disable-next-line @next/next/no-sync-scripts -- harus sinkron & sebelum paint, lihat komentar di atas */}
+        <script dangerouslySetInnerHTML={{ __html: suppressExtensionHydrationNoiseScript }} />
         <script dangerouslySetInnerHTML={{ __html: applyStoredPreferencesScript }} />
       </head>
       <body
-        className={`${inter.variable} ${ibmPlexSans.variable} ${plusJakartaSans.variable}`}
+        className={inter.variable}
         suppressHydrationWarning
       >
         <PreferencesProvider>

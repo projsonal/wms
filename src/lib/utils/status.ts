@@ -54,6 +54,14 @@ export const JENIS_ASET_META: Record<string, StatusMeta> = {
   transportasi: { label: 'Transportasi', variant: 'neutral' },
 };
 
+/** Indikator konektivitas hasil "Cek Ping" — terpisah dari ASSET_STATUS_META
+ * (kondisi fisik aset), lihat internal/model/asset.go PingStatus. */
+export const PING_STATUS_META: Record<'online' | 'offline' | 'unknown', StatusMeta> = {
+  online: { label: 'Online', variant: 'success' },
+  offline: { label: 'Offline', variant: 'danger' },
+  unknown: { label: 'Belum Dicek', variant: 'neutral' },
+};
+
 export const GENERIC_STATUS_META: Record<string, StatusMeta> = {
   aktif: { label: 'Aktif', variant: 'success' },
   nonaktif: { label: 'Nonaktif', variant: 'neutral' },

@@ -1,4 +1,4 @@
-import { apiClient } from '@/lib/api/client';
+import { apiClient, uploadFile } from '@/lib/api/client';
 import { createResourceApi } from '@/lib/api/resource';
 import { mapAssetRaw, mapBarangRusakRaw, mapBarangToItem, mapItemToBarangPayload, mapStockOpnameToRecords, mapSupplierRaw, mapUserRaw } from '@/lib/api/mappers';
 import type {
@@ -8,6 +8,7 @@ import type {
   RawBarangMasuk,
   RawBarangRusak,
   RawGudang,
+  RawRak,
   RawPengiriman,
   RawPurchaseOrder,
   RawStockOpname,
@@ -198,6 +199,50 @@ export const warehousesApi = {
   /** PATCH /gudang/:id/protect — khusus super_admin. */
   setProtected: (id: string, isProtected: boolean) =>
     apiClient.patch<RawGudang>(`/gudang/${id}/protect`, { is_protected: isProtected }),
+};
+
+// ---------------------------------------------------------------------------
+// Rak — penempatan fisik barang di dalam gudang (lihat model.Rak backend).
+// SENGAJA sederhana & manual (tanpa sensor/IoT): satu rak cuma py angka
+// "kapasitas" (dientry manual saat Tambah Rak) dan "terisi" (dihitung
+// backend dari SUM qty barang yang ditempatkan ke rak itu lewat proses
+// Barang Masuk/Keluar — lihat AdjustRakTerisi di backend, dipanggil
+// otomatis, BUKAN diisi manual dari sini). Status kosong/terisi_sebagian/
+// penuh dihitung otomatis dari dua angka itu (RecalculateStatus()).
+// ---------------------------------------------------------------------------
+export interface RakPayload {
+  kodeRak: string;
+  gudangId: number;
+  kapasitas: number;
+}
+
+export const rakApi = {
+  /** GET /gudang/rak?gudang_id=&page=&limit= */
+  list: async (gudangId: number, params?: ListParams): Promise<PaginatedResult<RawRak>> => {
+    const { data, meta } = await apiClient.getPaginated<RawRak>(
+      `/gudang/rak${buildQuery({ ...params, gudang_id: gudangId })}`,
+    );
+    return {
+      data,
+      page: meta?.page ?? 1,
+      pageSize: meta?.limit ?? data.length,
+      total: meta?.totalItems ?? data.length,
+    };
+  },
+  create: (payload: RakPayload) =>
+    apiClient.post<RawRak>('/gudang/rak', {
+      kode_rak: payload.kodeRak,
+      gudang_id: payload.gudangId,
+      kapasitas: payload.kapasitas,
+    }),
+  /** PUT /gudang/rak/:id — cuma kapasitas yang boleh diubah (kode rak &
+   * gudang bersifat tetap setelah dibuat; kalau salah, hapus & buat ulang). */
+  update: (id: number, kapasitas: number) =>
+    apiClient.put<RawRak>(`/gudang/rak/${id}`, { kapasitas }),
+  /** DELETE /gudang/rak/:id — backend menolak (409) kalau rak masih
+   * `terisi > 0`, jadi rak harus dikosongkan (barangnya dipindah/dikeluarkan
+   * dulu) sebelum bisa dihapus dari sini. */
+  remove: (id: number) => apiClient.delete<void>(`/gudang/rak/${id}`),
 };
 
 // ---------------------------------------------------------------------------
@@ -541,6 +586,48 @@ export interface AssetPayload {
   latitude?: number | null;
   longitude?: number | null;
   keterangan?: string;
+  ipAddress?: string;
+  /** Aset induk dalam hierarki jaringan FTTH (mis. ODP ini anak dari ODC mana). */
+  parentAssetId?: number | null;
+  /** Total slot port fisik (relevan untuk odc/odp/olt). */
+  jumlahPort?: number;
+}
+
+export interface AssetPingResult {
+  id: number;
+  ipAddress: string;
+  pingStatus: 'online' | 'offline' | 'unknown';
+  lastPingAt?: string | null;
+  rttMs?: number;
+}
+
+export interface AssetMapPoint {
+  id: number;
+  nama: string;
+  jenisAset: JenisAset;
+  labelRsd: string;
+  latitude: number;
+  longitude: number;
+  status: 'aktif' | 'rusak' | 'nonaktif';
+  ipAddress?: string;
+  pingStatus?: 'online' | 'offline' | 'unknown';
+  gudangId: number;
+  gudangNama: string;
+  gudangKode: string;
+  /** "pusat" | "cabang" — dipakai membedakan warna/label marker kantor pusat vs cabang. */
+  gudangTipe: 'pusat' | 'cabang';
+  /** Koordinat gudang pemilik (nil kalau gudang itu belum diisi koordinat)
+   * — dipakai menggambar garis "kabel" penghubung di halaman Tracking Aset. */
+  gudangLatitude?: number | null;
+  gudangLongitude?: number | null;
+  /** Aset induk hierarki jaringan (dipakai garis kabel yang benar, lihat
+   * AssetTrackingMap.tsx) — diprioritaskan dari gudangLatitude/Longitude
+   * kalau ada. */
+  parentAssetId?: number | null;
+  parentLatitude?: number | null;
+  parentLongitude?: number | null;
+  jumlahPort?: number;
+  portTerisi?: number;
 }
 
 export const assetsApi = {
@@ -563,7 +650,64 @@ export const assetsApi = {
   /** PATCH /aset/:id/status — menandai kondisi aset (aktif/rusak/nonaktif). */
   setStatus: (id: string, status: 'aktif' | 'rusak' | 'nonaktif') =>
     apiClient.patch<RawAsset>(`/aset/${id}/status`, { status }),
+  /** POST /aset/:id/ping — cek konektivitas satu aset yang punya ipAddress. */
+  ping: (id: string) => apiClient.post<AssetPingResult>(`/aset/${id}/ping`),
+  /** POST /aset/ping — cek konektivitas semua aset yang punya ipAddress. */
+  pingAll: () => apiClient.post<AssetPingResult[]>('/aset/ping'),
+  /** GET /aset/map — semua titik aset berkoordinat (tanpa paginasi), dipakai
+   * halaman Tracking Aset (peta). Filter opsional: jenisAset, gudangId,
+   * tipeGudang ('pusat'|'cabang'), status. */
+  map: (params?: { jenisAset?: JenisAset; gudangId?: number; tipeGudang?: 'pusat' | 'cabang'; status?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.jenisAset) q.set('jenis_aset', params.jenisAset);
+    if (params?.gudangId) q.set('gudang_id', String(params.gudangId));
+    if (params?.tipeGudang) q.set('tipe_gudang', params.tipeGudang);
+    if (params?.status) q.set('status', params.status);
+    const qs = q.toString();
+    return apiClient.get<AssetMapPoint[]>(`/aset/map${qs ? `?${qs}` : ''}`);
+  },
   remove: (id: string) => apiClient.delete<void>(`/aset/${id}`),
+};
+
+/** Riwayat perubahan aset (audit trail) — inti "tracking" yang sebenarnya:
+ * bukan cuma kondisi terkini, tapi apa yang berubah, kapan, siapa. */
+export interface AssetHistoryEntry {
+  id: number;
+  eventType: 'dibuat' | 'status' | 'lokasi' | 'induk' | 'ping' | 'port';
+  fieldLama?: string;
+  fieldBaru?: string;
+  catatan?: string;
+  userNama?: string;
+  createdAt: string;
+}
+
+export const assetHistoryApi = {
+  list: (assetId: string) => apiClient.get<AssetHistoryEntry[]>(`/aset/${assetId}/riwayat`),
+};
+
+/** Manajemen port perangkat jaringan (ODC/ODP/OLT) — meniru grid port di
+ * panel detail referensi Fibero. Cuma relevan untuk aset dengan jumlahPort > 0. */
+export interface AssetPortItem {
+  portNumber: number;
+  status: 'kosong' | 'terisi';
+  childAssetId?: number;
+  childAssetNama?: string;
+  childAssetLabel?: string;
+  customerName?: string;
+  customerPhone?: string;
+  keterangan?: string;
+}
+
+export const assetPortApi = {
+  list: (assetId: string) => apiClient.get<AssetPortItem[]>(`/aset/${assetId}/port`),
+  /** Isi/ubah satu port — kirim SALAH SATU: childAssetId (sambung ke aset
+   * lain) ATAU customerName (sambung ke pelanggan), tidak keduanya. */
+  set: (
+    assetId: string,
+    portNumber: number,
+    payload: { childAssetId?: number | null; customerName?: string; customerPhone?: string; keterangan?: string },
+  ) => apiClient.put<AssetPortItem[]>(`/aset/${assetId}/port/${portNumber}`, payload),
+  clear: (assetId: string, portNumber: number) => apiClient.delete<null>(`/aset/${assetId}/port/${portNumber}`),
 };
 
 /** GET/POST/PUT/PATCH/DELETE /barang-rusak — modul Barang Rusak (lihat
@@ -597,6 +741,10 @@ export const barangRusakApi = {
    * super_admin & admin. Mengunci status jadi "retur" atau "rusak". */
   inspeksi: (id: string, jenisBarang: 'retur' | 'rusak') =>
     apiClient.patch<RawBarangRusak>(`/barang-rusak/${id}/inspeksi`, { jenis_barang: jenisBarang }),
+  /** POST /barang-rusak/:id/foto (multipart, field "foto") — foto bukti
+   * kondisi fisik barang rusak, maks. 2MB. */
+  uploadFoto: (id: string, file: File) =>
+    uploadFile<RawBarangRusak>(`/barang-rusak/${id}/foto`, file, 'foto'),
   remove: (id: string) => apiClient.delete<void>(`/barang-rusak/${id}`),
 };
 
@@ -817,16 +965,30 @@ export interface AnalisaRaw {
   kategoriComposition: Array<{ label: string; value: number }>;
   topRestocked: Array<{ name: string; value: number }>;
   topKeluar: Array<{ name: string; value: number }>;
+  totalAset: number;
+  asetRusak: number;
+  asetPerJenis: Array<{ label: string; value: number }>;
+  asetPerStatus: Array<{ label: string; value: number }>;
+  asetPerGudang: Array<{ label: string; value: number }>;
 }
 
 /** GET /laporan/preview — dipakai ReportPageTemplate untuk menampilkan
  * data ASLI (bukan dummy) sebelum diunduh. Bentuk headers/rows generik
  * karena tiap tipe laporan kolomnya beda-beda (lihat backend buildReport). */
+export interface LaporanChartData {
+  title: string;
+  type: 'bar' | 'line';
+  labels: string[];
+  values: number[];
+}
+
 export interface LaporanPreview {
   title: string;
   headers: string[];
   rows: string[][];
   summary: Array<{ label: string; value: string }>;
+  chart?: LaporanChartData | null;
+  granularitas?: 'harian' | 'bulanan' | 'tahunan';
 }
 
 /** GET /app/version & GET /app/changelog — publik, tanpa perlu login.
@@ -834,6 +996,8 @@ export interface LaporanPreview {
 export interface AppVersionInfo {
   version: string;
   appName: string;
+  description?: string;
+  developer?: string;
 }
 
 export interface ChangelogEntry {
@@ -851,10 +1015,15 @@ export const appInfoApi = {
 };
 
 export const laporanApi = {
-  preview: (tipe: string, dari?: string, sampai?: string) => {
+  /** GET /laporan/preview — `granularitas` (harian/bulanan/tahunan) HANYA
+   * relevan untuk laporan berbasis tanggal (Barang Keluar/Masuk/Retur/PO/
+   * Stock Opname); diabaikan backend untuk Laporan Stok Barang (chart-nya
+   * top 10 stok, bukan deret waktu — lihat internal/controller/laporan/chart.go). */
+  preview: (tipe: string, dari?: string, sampai?: string, granularitas?: 'harian' | 'bulanan' | 'tahunan') => {
     const params = new URLSearchParams({ tipe });
     if (dari) params.set('dari', dari);
     if (sampai) params.set('sampai', sampai);
+    if (granularitas) params.set('granularitas', granularitas);
     return apiClient.get<LaporanPreview>(`/laporan/preview?${params.toString()}`);
   },
 };
@@ -894,3 +1063,53 @@ function buildQuery(params: ListParams = {}): string {
 
 // Dipertahankan supaya kompatibel dengan kode lama yang import UserRole dari sini.
 export type { UserRole };
+
+/** GET/PATCH /notifications — ikon lonceng notifikasi di header, tampil di
+ * SEMUA halaman untuk SEMUA role (lihat NotificationBell.tsx). */
+export interface AppNotification {
+  id: number;
+  type: string;
+  title: string;
+  message?: string;
+  linkHref?: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export const notificationApi = {
+  list: async (params?: ListParams): Promise<PaginatedResult<AppNotification>> => {
+    const { data, meta } = await apiClient.getPaginated<AppNotification>(`/notifications${buildQuery(params)}`);
+    return {
+      data,
+      page: meta?.page ?? 1,
+      pageSize: meta?.limit ?? data.length,
+      total: meta?.totalItems ?? data.length,
+    };
+  },
+  unreadCount: () => apiClient.get<{ unreadCount: number }>('/notifications/unread-count'),
+  markRead: (id: number) => apiClient.patch<null>(`/notifications/${id}/read`),
+  markAllRead: () => apiClient.patch<null>('/notifications/read-all'),
+  /** DELETE /notifications/:id — hapus dari daftar SAYA saja (lihat catatan
+   * di backend model.NotificationDismissed: notifikasi broadcast tetap
+   * tampil untuk user lain yang jadi target broadcast yang sama). */
+  remove: (id: number) => apiClient.delete<null>(`/notifications/${id}`),
+};
+
+/** GET/POST/DELETE /trash — Tempat Sampah, ikon di header (HANYA
+ * Super Admin & Admin, sesuai pembatasan backend). Mencakup 4 modul:
+ * Aset Gudang, Barang, Gudang, Barang Rusak. */
+export interface TrashItem {
+  type: 'aset' | 'barang' | 'gudang' | 'barang_rusak';
+  id: number;
+  judul: string;
+  subjudul?: string;
+  deletedAt: string;
+}
+
+export const trashApi = {
+  list: (type?: TrashItem['type']) =>
+    apiClient.get<TrashItem[]>(`/trash${type ? `?type=${type}` : ''}`),
+  restore: (type: TrashItem['type'], id: number) =>
+    apiClient.post<null>(`/trash/${type}/${id}/restore`),
+  purge: (type: TrashItem['type'], id: number) => apiClient.delete<null>(`/trash/${type}/${id}`),
+};

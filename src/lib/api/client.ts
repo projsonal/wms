@@ -329,23 +329,28 @@ export const apiClient = {
  * endpoint seperti `/laporan/export` yang membalas file langsung lewat
  * header Content-Disposition, bukan `{ data, meta }`.
  */
-export async function downloadFile(path: string, suggestedFilename?: string): Promise<void> {
-  async function attempt(isRetry: boolean): Promise<Response> {
-    const accessToken = getAccessToken();
-    const res = await fetch(`${API_BASE_URL}${path}`, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-    });
-    if (res.status === 401 && !isRetry) {
-      const refreshed = await refreshAccessToken();
-      if (refreshed) {
-        return attempt(true);
-      }
-      clearSession();
+/**
+ * Fetch GET biasa + header Authorization, dengan retry-setelah-refresh-token
+ * sekali kalau kena 401 — dipakai bareng oleh `downloadFile` &
+ * `fetchAuthedBlobUrl` di bawah supaya logikanya tidak duplikat.
+ */
+async function fetchWithAuthRetry(path: string, isRetry = false): Promise<Response> {
+  const accessToken = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+  });
+  if (res.status === 401 && !isRetry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return fetchWithAuthRetry(path, true);
     }
-    return res;
+    clearSession();
   }
+  return res;
+}
 
-  const response = await attempt(false);
+export async function downloadFile(path: string, suggestedFilename?: string): Promise<void> {
+  const response = await fetchWithAuthRetry(path);
   if (!response.ok) {
     let message = `Gagal mengunduh file (status ${response.status}).`;
     try {
@@ -373,3 +378,115 @@ export async function downloadFile(path: string, suggestedFilename?: string): Pr
 }
 
 export { HttpError };
+
+/**
+ * Ambil resource biner yang butuh login (mis. GET /users/:id/avatar — lihat
+ * ServeAvatar di internal/controller/users/user_controller.go, WAJIB header
+ * Authorization) dan kembalikan sebagai object URL (`URL.createObjectURL`)
+ * yang bisa langsung dipakai di `<img src>`.
+ *
+ * KENAPA INI PERLU: tag `<img src="...">` browser TIDAK bisa disuruh
+ * menyisipkan header custom seperti Authorization — beda dari
+ * `apiRequest`/`apiClient` yang manual fetch + header. Endpoint avatar
+ * sengaja mewajibkan token (foto profil = data pribadi, tidak boleh
+ * dibuka siapa saja lewat URL statis, lihat catatan di ServeAvatar), jadi
+ * satu-satunya cara menampilkannya di <img> adalah fetch manual dulu lalu
+ * ubah hasilnya jadi blob URL — persis pola yang sudah dipakai
+ * `downloadFile` di atas, cuma di sini hasilnya dipakai untuk ditampilkan,
+ * bukan diunduh.
+ *
+ * `path` relatif terhadap API_BASE_URL (mis. "/users/5/avatar?v=123",
+ * hasil dari field `avatar_url` di Response backend) — BUKAN API_ORIGIN
+ * seperti `resolveUploadUrl`, karena route ini terdaftar di bawah grup
+ * `/stockrsd` (lihat internal/routes/router.go), bukan static root.
+ * Mengembalikan `null` kalau resource tidak ada (404, mis. user belum
+ * pernah upload foto) supaya pemanggil bisa jatuh ke avatar inisial tanpa
+ * dianggap error.
+ */
+export async function fetchAuthedBlobUrl(path: string): Promise<string | null> {
+  const response = await fetchWithAuthRetry(path);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new HttpError(`Gagal memuat gambar (status ${response.status}).`, String(response.status));
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+/**
+ * Origin backend TANPA path prefix (`/stockrsd`) — dipakai untuk resolve
+ * URL file yang disajikan statis di root app, seperti foto profil hasil
+ * upload (`/uploads/avatars/xxx.jpg`, lihat app.Static("/uploads", ...) di
+ * internal/routes/router.go). BEDA dari API_BASE_URL yang sudah termasuk
+ * `/stockrsd` untuk endpoint REST.
+ */
+export const API_ORIGIN = (() => {
+  try {
+    return new URL(API_BASE_URL).origin;
+  } catch {
+    return '';
+  }
+})();
+
+/** Gabungkan path relatif (mis. avatarUrl dari backend) dengan API_ORIGIN.
+ * Path yang sudah absolut (http/https) dikembalikan apa adanya. */
+export function resolveUploadUrl(path?: string | null): string | undefined {
+  if (!path) return undefined;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_ORIGIN}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+/**
+ * Upload file (multipart/form-data) ke backend — beda dari `apiClient.*`
+ * yang selalu mengirim JSON. Dipakai untuk endpoint seperti
+ * `POST /users/me/avatar` (lihat internal/controller/users UploadAvatar).
+ * `fieldName` harus sama persis dengan nama field yang dibaca backend lewat
+ * `c.FormFile("...")`.
+ */
+export async function uploadFile<TResponse>(
+  path: string,
+  file: File,
+  fieldName = 'file',
+): Promise<TResponse> {
+  async function attempt(isRetry: boolean): Promise<Response> {
+    const accessToken = getAccessToken();
+    const botToken = getBotToken();
+    const formData = new FormData();
+    formData.append(fieldName, file);
+
+    const headers: Record<string, string> = {};
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    if (botToken) headers[BOT_TOKEN_HEADER] = botToken;
+
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers, // JANGAN set Content-Type manual — browser mengisi boundary multipart otomatis
+      body: formData,
+    });
+
+    const rotatedBotToken = res.headers.get(BOT_TOKEN_HEADER);
+    if (rotatedBotToken) setBotToken(rotatedBotToken);
+
+    if (res.status === 401 && !isRetry) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) return attempt(true);
+      clearSession();
+    }
+    return res;
+  }
+
+  const response = await attempt(false);
+  const rawEnvelope = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null;
+  const envelope = rawEnvelope ? camelizeKeysDeep<ApiEnvelope<TResponse>>(rawEnvelope) : null;
+
+  if (!response.ok || !envelope?.success) {
+    throw new HttpError(
+      envelope?.message ?? `Gagal mengunggah file (status ${response.status}).`,
+      String(response.status),
+      toFieldErrorMap(envelope?.errors),
+    );
+  }
+  return envelope.data as TResponse;
+}

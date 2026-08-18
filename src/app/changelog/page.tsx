@@ -81,6 +81,14 @@ export default function ChangelogPage(): React.JSX.Element {
           </p>
         </div>
 
+        <div className="rounded-lg border border-borderSoft bg-surface p-5 shadow-card">
+          <h2 className="mb-1 text-sm font-bold uppercase tracking-wide text-textMuted">Tentang Aplikasi</h2>
+          <p className="text-sm text-text">{versionInfo?.description ?? 'Memuat...'}</p>
+          {versionInfo?.developer ? (
+            <p className="mt-2 text-xs text-textMuted">Dikembangkan oleh {versionInfo.developer}</p>
+          ) : null}
+        </div>
+
         {isLoading ? (
           <p className="text-sm text-textMuted">Memuat riwayat pembaruan...</p>
         ) : (

@@ -209,15 +209,20 @@ interface MobileFabProps {
   actions: ActionDef[];
 }
 
-const RADIAL_RADIUS = 92;
+const RADIAL_RADIUS = 84;
 
 /**
  * Floating action button bulat khusus mobile: lingkaran utama "+" yang
- * saat disentuh memekar jadi cincin 6 tombol bulat kecil tersebar
- * melingkar di sekelilingnya (mengikuti sudut -170°..-10°, membentuk
- * busur di atas tombol utama supaya tidak ketutupan jari saat disentuh),
- * lalu lingkaran utama berubah jadi "×" untuk menutup — persis pola pada
- * referensi Figma yang diberikan.
+ * saat disentuh memekar jadi cincin tombol bulat kecil tersebar di
+ * SEKELILING tombol utama (busur ~350°, dari sedikit di atas kanan,
+ * melingkar lewat atas, kiri, sampai ke bawah — cuma celah kecil di sisi
+ * kanan langsung yang dilewati, karena FAB ada di pojok kanan layar dan
+ * arah itu akan keluar layar). Sebelumnya cuma busur 160° di atas saja
+ * ("membuka ke atas"), jadi 7 aksi (Add/Change/Delete/Export/Print/
+ * Modify/Protect — setara lengkap dengan action bar di laptop) terlalu
+ * berdesakan; sekarang tersebar sampai ke bawah supaya semua tombol
+ * jelas terpisah & gampang disentuh, meniru kelengkapan tombol yang ada
+ * di tampilan laptop. Lingkaran utama berubah jadi "×" untuk menutup.
  */
 function MobileFabActionMenu({ onAction, disabledActions, actions }: MobileFabProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -240,16 +245,15 @@ function MobileFabActionMenu({ onAction, disabledActions, actions }: MobileFabPr
         ) : null}
       </AnimatePresence>
 
-      <div className="fixed bottom-20 right-5 z-50">
+      <div className="fixed bottom-20 right-8 z-50 sm:right-10">
         <div className="relative h-0 w-0">
           <AnimatePresence>
             {open
               ? actions.map((action, index) => {
-                  // Sebar tombol di busur -170°..-10° (di atas tombol
-                  // utama, membuka ke kiri-atas) supaya tetap terjangkau
-                  // ibu jari saat FAB ada di pojok kanan bawah.
-                  const angleDeg =
-                    actions.length > 1 ? -170 + index * (160 / (actions.length - 1)) : -90;
+                  // Sapuan -5°..-355° (350° total, searah jarum jam lewat
+                  // atas/kiri/bawah) — cuma celah ~10° di sisi kanan
+                  // langsung (mengarah keluar layar) yang dilewati.
+                  const angleDeg = actions.length > 1 ? -5 + index * (-350 / (actions.length - 1)) : -90;
                   const angleRad = (angleDeg * Math.PI) / 180;
                   const x = Math.cos(angleRad) * RADIAL_RADIUS;
                   const y = Math.sin(angleRad) * RADIAL_RADIUS;

@@ -48,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
     links: [
       { label: 'Barang Masuk', href: '/home/barang-masuk', roles: ALL_ROLES },
       { label: 'Barang Keluar', href: '/home/barang-keluar', roles: ALL_ROLES },
+      { label: 'Barang Rusak', href: '/home/barang-rusak', roles: ALL_ROLES },
       { label: 'Kelola Barang', href: '/home/kelola-barang', roles: ALL_ROLES },
     ],
   },
@@ -63,7 +64,7 @@ export const NAV_GROUPS: NavGroup[] = [
     links: [
       { label: 'Manajemen User', href: '/home/user-management', roles: ['super_admin'] },
       { label: 'Manajemen Aset Gudang', href: '/home/aset-gudang', roles: ALL_ROLES },
-      { label: 'Barang Rusak', href: '/home/barang-rusak', roles: ALL_ROLES },
+      { label: 'Tracking Aset', href: '/home/tracking-aset', roles: ALL_ROLES },
       { label: 'Manajemen Gudang', href: '/home/warehouse-management', roles: STAFF_ROLES },
       { label: 'Manajemen Inventaris', href: '/home/inventory-management', roles: STAFF_ROLES },
     ],

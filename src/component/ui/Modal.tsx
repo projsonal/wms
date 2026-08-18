@@ -64,8 +64,14 @@ export function Modal({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="w-full max-w-lg rounded-lg bg-surface p-6 shadow-card">
-        <div className="mb-4 flex items-center justify-between">
+      {/* max-h + flex column supaya header & footer selalu terlihat (fixed),
+          sementara isi form yang panjang (mis. Supplier dengan daftar
+          checkbox kurir) di-scroll di dalam area tengah — sebelumnya modal
+          tidak punya batas tinggi sama sekali, jadi form panjang meluber
+          keluar layar dan tombol Simpan/Batal di footer jadi tidak
+          terjangkau di layar pendek/laptop kecil. */}
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-lg bg-surface shadow-card">
+        <div className="flex items-center justify-between border-b border-borderSoft px-6 py-4">
           <h2 className="text-lg font-semibold text-text">{title}</h2>
           <button
             type="button"
@@ -76,10 +82,15 @@ export function Modal({
             ×
           </button>
         </div>
-        <div className="flex flex-col gap-4" onKeyDown={handleContentKeyDown}>
+        <div
+          className="flex flex-col gap-4 overflow-y-auto px-6 py-4"
+          onKeyDown={handleContentKeyDown}
+        >
           {children}
         </div>
-        {footer ? <div className="mt-6 flex justify-end gap-3">{footer}</div> : null}
+        {footer ? (
+          <div className="flex justify-end gap-3 border-t border-borderSoft px-6 py-4">{footer}</div>
+        ) : null}
       </div>
     </div>
   );

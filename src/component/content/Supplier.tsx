@@ -422,36 +422,52 @@ export function SupplierContent(): React.JSX.Element {
           </>
         }
       >
-        <div className="grid grid-cols-2 gap-4">
+        {/* Bagian 1 — Identitas dasar */}
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="Kode Supplier"
+              value={form.code ?? ''}
+              onChange={(event) => setForm({ ...form, code: event.target.value })}
+              placeholder="SUP-0001"
+            />
+            <Input
+              label="Nama Supplier"
+              value={form.name ?? ''}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="PIC / Kontak"
+              value={form.contactPerson ?? ''}
+              onChange={(event) => setForm({ ...form, contactPerson: event.target.value })}
+            />
+            <Input
+              label="No. Telepon"
+              value={form.phone ?? ''}
+              onChange={(event) => setForm({ ...form, phone: event.target.value })}
+            />
+          </div>
           <Input
-            label="Kode Supplier"
-            value={form.code ?? ''}
-            onChange={(event) => setForm({ ...form, code: event.target.value })}
-            placeholder="SUP-0001"
-          />
-          <Input
-            label="Nama Supplier"
-            value={form.name ?? ''}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
+            label="Alamat"
+            value={form.address ?? ''}
+            onChange={(event) => setForm({ ...form, address: event.target.value })}
           />
         </div>
-        <Input
-          label="PIC / Kontak"
-          value={form.contactPerson ?? ''}
-          onChange={(event) => setForm({ ...form, contactPerson: event.target.value })}
-        />
-        <Input
-          label="No. Telepon"
-          value={form.phone ?? ''}
-          onChange={(event) => setForm({ ...form, phone: event.target.value })}
-        />
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-text">Kerjasama Kurir</span>
-          <p className="text-xs text-textMuted">
-            Pilih kurir yang dipakai supplier ini untuk mengirim barang ke lokasi tujuan — dipakai
-            menghitung Total Order & Rating otomatis dari data pengiriman.
-          </p>
-          <div className="flex flex-wrap gap-3">
+
+        {/* Bagian 2 — Kerjasama kurir, dikelompokkan dalam kartu terpisah
+            supaya grid checkbox tidak menyatu dengan field teks di atas &
+            bawahnya (sumber utama tampilan "berantakan" sebelumnya). */}
+        <div className="flex flex-col gap-3 rounded-md border border-borderSoft bg-neutralBg/40 p-4">
+          <div>
+            <span className="text-sm font-medium text-text">Kerjasama Kurir</span>
+            <p className="mt-0.5 text-xs text-textMuted">
+              Pilih kurir yang dipakai supplier ini untuk mengirim barang ke lokasi tujuan — dipakai
+              menghitung Total Order &amp; Rating otomatis dari data pengiriman.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
             {COMMON_COURIERS.map((courier) => {
               const checked = (form.courierPartners ?? []).includes(courier);
               return (
@@ -468,7 +484,7 @@ export function SupplierContent(): React.JSX.Element {
                           : [...current, courier],
                       });
                     }}
-                    className="h-4 w-4"
+                    className="h-4 w-4 shrink-0"
                   />
                   {courier}
                 </label>
@@ -489,12 +505,9 @@ export function SupplierContent(): React.JSX.Element {
             }}
           />
         </div>
-        <Input
-          label="Alamat"
-          value={form.address ?? ''}
-          onChange={(event) => setForm({ ...form, address: event.target.value })}
-        />
-        <div className="grid grid-cols-2 gap-4">
+
+        {/* Bagian 3 — Data administratif opsional */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             label="NPWP (opsional)"
             value={form.npwp ?? ''}

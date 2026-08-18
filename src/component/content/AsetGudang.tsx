@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Pencil, Trash2, MapPin } from 'lucide-react';
+import clsx from 'clsx';
+import { Pencil, Trash2, MapPin, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
@@ -18,7 +19,7 @@ import { useResourceList } from '@/lib/hooks/useResourceList';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
-import { ASSET_STATUS_META, JENIS_ASET_META } from '@/lib/utils/status';
+import { ASSET_STATUS_META, JENIS_ASET_META, PING_STATUS_META } from '@/lib/utils/status';
 import type { Asset, AssetStatus, JenisAset } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
@@ -43,6 +44,10 @@ const CONFIRM_DELETE_MESSAGE = 'Apakah yakin ingin menghapus aset ini? Label/kod
 
 function punyaKoordinat(jenis?: JenisAset): boolean {
   return jenis !== undefined && jenis !== 'transportasi';
+}
+
+function punyaPort(jenis?: JenisAset): boolean {
+  return jenis === 'odc' || jenis === 'odp' || jenis === 'olt';
 }
 
 function AsetGudangBody(): React.JSX.Element {
@@ -87,6 +92,9 @@ function AsetGudangBody(): React.JSX.Element {
       latitude: row.latitude ?? null,
       longitude: row.longitude ?? null,
       keterangan: row.keterangan ?? '',
+      ipAddress: row.ipAddress ?? '',
+      parentAssetId: row.parentAssetId ? Number(row.parentAssetId) : null,
+      jumlahPort: row.jumlahPort ?? 0,
     });
     setIsModalOpen(true);
   }
@@ -109,6 +117,9 @@ function AsetGudangBody(): React.JSX.Element {
         latitude: punyaKoordinat(form.jenisAset) ? form.latitude ?? null : null,
         longitude: punyaKoordinat(form.jenisAset) ? form.longitude ?? null : null,
         keterangan: form.keterangan ?? '',
+        ipAddress: form.ipAddress?.trim() || undefined,
+        parentAssetId: punyaKoordinat(form.jenisAset) ? form.parentAssetId ?? null : null,
+        jumlahPort: punyaPort(form.jenisAset) ? form.jumlahPort ?? 0 : 0,
       };
       if (editingId) {
         await assetsApi.update(editingId, payload);
@@ -150,6 +161,42 @@ function AsetGudangBody(): React.JSX.Element {
       await mutate();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal memperbarui status aset.'));
+    }
+  }
+
+  const [pingingId, setPingingId] = useState<string | null>(null);
+  const [isPingingAll, setIsPingingAll] = useState(false);
+
+  async function handlePing(row: Asset): Promise<void> {
+    if (!row.ipAddress) {
+      toast.error('Aset ini belum punya alamat IP — isi dulu lewat form Ubah Aset.');
+      return;
+    }
+    setPingingId(row.id);
+    try {
+      const res = await assetsApi.ping(row.id);
+      toast[res.pingStatus === 'online' ? 'success' : 'error'](
+        `${row.labelRsd ?? row.nama}: ${res.pingStatus === 'online' ? `Online (${res.rttMs ?? 0}ms)` : res.pingStatus === 'offline' ? 'Offline / tidak merespon' : 'Gagal dicek'}`,
+      );
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal melakukan ping.'));
+    } finally {
+      setPingingId(null);
+    }
+  }
+
+  async function handlePingAll(): Promise<void> {
+    setIsPingingAll(true);
+    try {
+      const results = await assetsApi.pingAll();
+      const online = results.filter((r) => r.pingStatus === 'online').length;
+      toast.success(`Cek ping selesai: ${online}/${results.length} aset online.`);
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal melakukan cek ping massal.'));
+    } finally {
+      setIsPingingAll(false);
     }
   }
 
@@ -312,11 +359,40 @@ function AsetGudangBody(): React.JSX.Element {
       },
     },
     {
+      key: 'ping',
+      header: 'Ping',
+      render: (row) => {
+        if (!row.ipAddress) return <span className="text-xs text-textMuted">-</span>;
+        const meta = PING_STATUS_META[row.pingStatus ?? 'unknown'];
+        return (
+          <span className="inline-flex items-center gap-1">
+            {row.pingStatus === 'online' ? (
+              <Wifi className="h-3 w-3 text-successText" />
+            ) : row.pingStatus === 'offline' ? (
+              <WifiOff className="h-3 w-3 text-dangerText" />
+            ) : null}
+            <Badge label={meta.label} variant={meta.variant} />
+          </span>
+        );
+      },
+    },
+    {
       key: 'row-actions',
       header: '',
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-2">
+          {row.ipAddress ? (
+            <button
+              type="button"
+              onClick={() => handlePing(row)}
+              disabled={pingingId === row.id}
+              title="Cek Ping"
+              className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark disabled:opacity-50"
+            >
+              <RefreshCw className={clsx('h-3.5 w-3.5', pingingId === row.id && 'animate-spin')} />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => openEditModal(row)}
@@ -352,6 +428,11 @@ function AsetGudangBody(): React.JSX.Element {
           { id: 'transportasi', label: 'Transportasi', value: summary.transportasi },
         ]}
       />
+      <div className="flex items-center justify-end">
+        <Button variant="secondary" onClick={handlePingAll} loading={isPingingAll}>
+          <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Cek Semua Ping
+        </Button>
+      </div>
       <DataTable
         title="Daftar Aset Gudang"
         description={
@@ -434,6 +515,41 @@ function AsetGudangBody(): React.JSX.Element {
             Transportasi tidak punya titik koordinat tetap — diberi kode BA (Barang Aset), bukan label RSD.
           </p>
         )}
+        {punyaKoordinat(form.jenisAset) ? (
+          <Input
+            label="Alamat IP (opsional)"
+            value={form.ipAddress ?? ''}
+            onChange={(event) => setForm({ ...form, ipAddress: event.target.value })}
+            placeholder="mis. 192.168.1.10 — isi untuk mengaktifkan fitur Cek Ping"
+          />
+        ) : null}
+        {punyaKoordinat(form.jenisAset) ? (
+          <Select
+            label="Induk Jaringan (opsional)"
+            value={form.parentAssetId != null ? String(form.parentAssetId) : ''}
+            onChange={(event) =>
+              setForm({ ...form, parentAssetId: event.target.value === '' ? null : Number(event.target.value) })
+            }
+            options={rows
+              .filter((r) => r.id !== editingId && punyaKoordinat(r.jenisAset))
+              .map((r) => ({
+                value: r.id,
+                label: `${JENIS_ASET_META[r.jenisAset]?.label ?? r.jenisAset} — ${r.labelRsd ?? r.nama}`,
+              }))}
+            placeholder="Tidak ada (titik teratas hierarki)"
+          />
+        ) : null}
+        {punyaPort(form.jenisAset) ? (
+          <Input
+            label="Jumlah Port"
+            type="number"
+            min={0}
+            max={512}
+            value={form.jumlahPort ?? 0}
+            onChange={(event) => setForm({ ...form, jumlahPort: Number(event.target.value) })}
+            placeholder="mis. 8 — jumlah slot port fisik perangkat ini"
+          />
+        ) : null}
         <Input
           label="Keterangan (opsional)"
           value={form.keterangan ?? ''}

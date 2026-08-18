@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Route, Loader2 } from 'lucide-react';
 import { deliveriesApi } from '@/lib/api/modules';
@@ -60,6 +60,17 @@ interface RouteTrackingMapProps {
   /** Pusat peta default kalau TIDAK ADA satu pun koordinat yang valid
    * (asal, tujuan, maupun posisi kurir) — supaya peta tidak crash. */
   fallbackCenter: { lat: number; lng: number };
+  /** true kalau dokumen pengiriman berstatus "terkirim" — lihat catatan
+   * di RouteMarkers/effectiveCourierPos kenapa ini mengubah titik yang
+   * ditampilkan sebagai posisi kurir. */
+  isDelivered?: boolean;
+  /** Dipanggil tiap kali rute jalan sungguhan (OSRM) berhasil dihitung —
+   * dipakai StatCards di DeliveryDetail.tsx supaya kartu "Jarak Tempuh"
+   * menampilkan angka HASIL PERHITUNGAN RUTE JALAN ini, bukan
+   * `delivery.distanceKm` statis dari backend yang tidak pernah
+   * ter-update (itu sebabnya sebelumnya selalu kelihatan "0 km" walau
+   * rute sudah tergambar di peta). */
+  onRouteComputed?: (route: { distanceKm: number; durationMin: number }) => void;
 }
 
 /**
@@ -67,9 +78,13 @@ interface RouteTrackingMapProps {
  * menampilkan satu titik (posisi kurir/gudang asal): di sini digambar
  * marker ASAL, marker TUJUAN (kalau koordinatnya sudah diisi lewat form
  * Jadwalkan Pickup/Dropoff), marker POSISI KURIR live (polling tiap 5
- * detik), garis lurus asal→kurir→tujuan sebagai default, DAN tombol
- * "Tampilkan Rute" opsional yang menggambar rute jalan sungguhan (lihat
- * fetchRoadRoute, OSRM) menggantikan garis lurus itu.
+ * detik), garis lurus asal→kurir→tujuan sebagai default, DAN rute jalan
+ * sungguhan (lihat fetchRoadRoute, OSRM, profil "driving" — mengikuti
+ * jalan raya yang bisa dilalui motor maupun mobil, bukan jalur pejalan
+ * kaki) yang otomatis dihitung SEKALI begitu titik asal & tujuan
+ * tersedia (lihat useEffect auto-fetch di bawah), menggantikan garis
+ * lurus itu. Tombol "Tampilkan Rute" tetap ada untuk hitung ULANG manual
+ * kalau kurir sudah jauh menyimpang dari rute awal.
  */
 export function RouteTrackingMap({
   deliveryId,
@@ -79,6 +94,8 @@ export function RouteTrackingMap({
   destinationLabel,
   destinationCoord,
   fallbackCenter,
+  isDelivered = false,
+  onRouteComputed,
 }: RouteTrackingMapProps): React.JSX.Element {
   const [courierPos, setCourierPos] = useState<{ lat: number; lng: number } | null>(null);
   const [recordedAt, setRecordedAt] = useState<string | null>(null);
@@ -90,6 +107,13 @@ export function RouteTrackingMap({
   const [roadRouteDestKey, setRoadRouteDestKey] = useState<string | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
+  // Penanda "sudah pernah auto-fetch untuk kombinasi asal+tujuan INI" —
+  // beda dari roadRouteDestKey (yang cuma lacak tujuan) karena auto-fetch
+  // harus tepat SEKALI per kombinasi, tidak boleh nembak ulang tiap
+  // courierPos bergeser sedikit dari polling 5 detik (baru itu yang
+  // dianggap "membebani server publik tiap kali peta dibuka" — beda dari
+  // 1x saat rute memang baru pertama kali bisa dihitung).
+  const autoFetchedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     import('leaflet').then((L) => {
@@ -104,6 +128,12 @@ export function RouteTrackingMap({
   }, []);
 
   useEffect(() => {
+    // Sudah terkirim -> kurir sudah selesai & (lihat ShareLocationButton
+    // di DeliveryDetail.tsx) tidak lagi membagikan lokasi, jadi polling
+    // posisi live tidak berguna lagi -- titik akhir yang relevan adalah
+    // titik TUJUAN (lihat effectiveCourierPos di bawah), bukan posisi GPS
+    // terakhir yang mungkin terekam sedikit sebelum benar-benar sampai.
+    if (isDelivered) return;
     let cancelled = false;
     async function poll(): Promise<void> {
       try {
@@ -123,7 +153,15 @@ export function RouteTrackingMap({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [deliveryId]);
+  }, [deliveryId, isDelivered]);
+
+  // Sudah terkirim & titik tujuan sudah diisi -> anggap kurir "ada" di
+  // titik tujuan (memenuhi permintaan: "titik koordinatnya muncul di
+  // titik akhir" begitu pengiriman diselesaikan), bukan tetap menampilkan
+  // posisi GPS terakhir yang mungkin meleset dari lokasi tujuan
+  // sebenarnya. Kalau tujuan belum diisi koordinatnya, tetap pakai posisi
+  // GPS terakhir yang sempat terekam sebagai fallback.
+  const effectiveCourierPos = isDelivered && destinationCoord ? destinationCoord : courierPos;
 
   const destKey = destinationCoord ? `${destinationCoord.lat},${destinationCoord.lng}` : null;
   // Rute basi (dihitung untuk tujuan yang berbeda dari sekarang) diabaikan
@@ -131,7 +169,7 @@ export function RouteTrackingMap({
   const activeRoadRoute = roadRouteDestKey === destKey ? roadRoute : null;
 
   async function handleShowRoute(): Promise<void> {
-    const from = courierPos ?? originCoord;
+    const from = effectiveCourierPos ?? originCoord;
     if (!from || !destinationCoord) return;
     setIsLoadingRoute(true);
     setRouteError(null);
@@ -143,6 +181,7 @@ export function RouteTrackingMap({
       }
       setRoadRoute(route);
       setRoadRouteDestKey(destKey);
+      onRouteComputed?.({ distanceKm: route.distanceKm, durationMin: route.durationMin });
     } catch {
       setRouteError('Gagal mengambil rute — coba lagi (server rute publik kadang sibuk).');
     } finally {
@@ -152,12 +191,30 @@ export function RouteTrackingMap({
 
   const straightPoints: [number, number][] = [];
   if (originCoord) straightPoints.push([originCoord.lat, originCoord.lng]);
-  if (courierPos) straightPoints.push([courierPos.lat, courierPos.lng]);
+  if (effectiveCourierPos) straightPoints.push([effectiveCourierPos.lat, effectiveCourierPos.lng]);
   if (destinationCoord) straightPoints.push([destinationCoord.lat, destinationCoord.lng]);
 
-  const center = courierPos ?? originCoord ?? destinationCoord ?? fallbackCenter;
-  const hasAnyCoord = Boolean(originCoord || destinationCoord || courierPos);
-  const canShowRoute = Boolean((courierPos ?? originCoord) && destinationCoord);
+  const center = effectiveCourierPos ?? originCoord ?? destinationCoord ?? fallbackCenter;
+  const hasAnyCoord = Boolean(originCoord || destinationCoord || effectiveCourierPos);
+  const canShowRoute = Boolean((effectiveCourierPos ?? originCoord) && destinationCoord);
+
+  // Auto-hitung rute jalan SEKALI begitu titik asal/kurir & tujuan
+  // sama-sama tersedia — memenuhi permintaan "otomatis diarahkan rute",
+  // tapi tetap dijaga supaya tidak menembak OSRM berulang-ulang tiap
+  // courierPos bergeser dikit dari polling 5 detik: kunci
+  // autoFetchedKeyRef dari kombinasi titik AWAL saja (originCoord kalau
+  // ada, atau "courier" generik), bukan posisi live yang terus berubah —
+  // begitu kombinasi asal+tujuan pernah di-auto-fetch, tidak akan
+  // nembak ulang otomatis lagi (tombol "Tampilkan Rute" tetap bisa
+  // dipakai manual kapan saja untuk hitung ulang).
+  useEffect(() => {
+    if (!canShowRoute || isLoadingRoute) return;
+    const autoKey = `${originCoord ? 'o' : 'c'}:${destKey}`;
+    if (autoFetchedKeyRef.current === autoKey) return;
+    autoFetchedKeyRef.current = autoKey;
+    handleShowRoute();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sengaja cuma re-run saat canShowRoute/destKey berubah, bukan tiap courierPos bergeser (lihat catatan di atas)
+  }, [canShowRoute, destKey]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -173,9 +230,10 @@ export function RouteTrackingMap({
             originLabel={originLabel}
             destinationCoord={destinationCoord}
             destinationLabel={destinationLabel}
-            courierPos={courierPos}
+            courierPos={effectiveCourierPos}
             courierName={courierName}
             recordedAt={recordedAt}
+            isDelivered={isDelivered}
           />
         </MapContainer>
         <MapHint hasAnyCoord={hasAnyCoord} hasDestination={Boolean(destinationCoord)} />
@@ -186,15 +244,15 @@ export function RouteTrackingMap({
           type="button"
           onClick={handleShowRoute}
           disabled={!canShowRoute || isLoadingRoute}
-          title={canShowRoute ? 'Gambar rute jalan sungguhan dari OSRM' : 'Butuh koordinat asal/kurir DAN tujuan dulu'}
+          title={canShowRoute ? 'Hitung ulang rute jalan dari OSRM' : 'Butuh koordinat asal/kurir DAN tujuan dulu'}
           className="flex items-center gap-1.5 rounded-md border border-borderSoft px-3 py-1.5 font-semibold text-text hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isLoadingRoute ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Route className="h-3.5 w-3.5" />}
-          {isLoadingRoute ? 'Menghitung rute...' : 'Tampilkan Rute'}
+          {isLoadingRoute ? 'Menghitung rute...' : 'Hitung Ulang Rute'}
         </button>
         {activeRoadRoute ? (
           <span className="text-textMuted">
-            ≈ {activeRoadRoute.distanceKm.toFixed(1)} km · {Math.round(activeRoadRoute.durationMin)} menit (perkiraan jalan raya)
+            ≈ {activeRoadRoute.distanceKm.toFixed(1)} km · {Math.round(activeRoadRoute.durationMin)} menit (perkiraan jalan raya, motor/mobil)
           </span>
         ) : null}
         {routeError ? <span className="text-dangerText">{routeError}</span> : null}
@@ -226,6 +284,7 @@ interface RouteMarkersProps {
   courierPos: { lat: number; lng: number } | null;
   courierName: string;
   recordedAt: string | null;
+  isDelivered: boolean;
 }
 
 function RouteMarkers({
@@ -236,6 +295,7 @@ function RouteMarkers({
   courierPos,
   courierName,
   recordedAt,
+  isDelivered,
 }: RouteMarkersProps): React.JSX.Element {
   return (
     <>
@@ -262,13 +322,19 @@ function RouteMarkers({
           <Popup>
             <strong>{courierName}</strong>
             <br />
-            Posisi terakhir
-            {recordedAt ? (
+            {isDelivered ? (
+              'Pengiriman selesai di sini'
+            ) : (
               <>
-                <br />
-                {new Date(recordedAt).toLocaleTimeString('id-ID')}
+                Posisi terakhir
+                {recordedAt ? (
+                  <>
+                    <br />
+                    {new Date(recordedAt).toLocaleTimeString('id-ID')}
+                  </>
+                ) : null}
               </>
-            ) : null}
+            )}
           </Popup>
         </Marker>
       ) : null}

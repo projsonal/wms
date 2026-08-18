@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Trash2, Pencil, CheckCircle2, XCircle } from 'lucide-react';
+import { Trash2, Pencil, CheckCircle2, XCircle, Camera } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
@@ -18,6 +18,7 @@ import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { BARANG_RUSAK_STATUS_META } from '@/lib/utils/status';
+import { resolveUploadUrl } from '@/lib/api/client';
 import type { BarangRusak } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
@@ -37,6 +38,9 @@ function BarangRusakBody(): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<BarangRusakPayload>>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
+  const [fotoTargetId, setFotoTargetId] = useState<string | null>(null);
+  const [uploadingFotoId, setUploadingFotoId] = useState<string | null>(null);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
 
   function openCreateModal(): void {
     setEditingId(null);
@@ -56,6 +60,33 @@ function BarangRusakBody(): React.JSX.Element {
       keterangan: row.keterangan ?? '',
     });
     setIsModalOpen(true);
+  }
+
+  function triggerFotoUpload(row: BarangRusak): void {
+    setFotoTargetId(row.id);
+    fotoInputRef.current?.click();
+  }
+
+  async function handleFotoChange(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    const targetId = fotoTargetId;
+    if (!file || !targetId) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Ukuran foto maksimal 2MB.');
+      return;
+    }
+    setUploadingFotoId(targetId);
+    try {
+      await barangRusakApi.uploadFoto(targetId, file);
+      toast.success('Foto bukti berhasil diunggah.');
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal mengunggah foto bukti.'));
+    } finally {
+      setUploadingFotoId(null);
+      setFotoTargetId(null);
+    }
   }
 
   async function handleSave(): Promise<void> {
@@ -162,6 +193,19 @@ function BarangRusakBody(): React.JSX.Element {
   }
 
   const columns: DataTableColumn<BarangRusak>[] = [
+    {
+      key: 'foto',
+      header: 'Foto',
+      render: (row) => {
+        const url = resolveUploadUrl(row.fotoUrl);
+        return url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- foto disajikan dari domain backend terpisah
+          <img src={url} alt="Bukti kerusakan" className="h-10 w-10 rounded-md border border-borderSoft object-cover" />
+        ) : (
+          <span className="text-xs text-textMuted">-</span>
+        );
+      },
+    },
     { key: 'label', header: 'Label / Kode', render: (row) => <span className="font-mono text-xs">{row.labelBarang}</span> },
     { key: 'nama', header: 'Nama Barang', render: (row) => row.namaBarang },
     { key: 'keterangan', header: 'Keterangan', render: (row) => row.keterangan || '-' },
@@ -180,6 +224,15 @@ function BarangRusakBody(): React.JSX.Element {
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => triggerFotoUpload(row)}
+            disabled={uploadingFotoId === row.id}
+            title="Unggah Foto Bukti"
+            className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark disabled:opacity-50"
+          >
+            <Camera className="h-3.5 w-3.5" />
+          </button>
           {isStaff && row.status === 'pengecekan' ? (
             <>
               <button
@@ -235,6 +288,16 @@ function BarangRusakBody(): React.JSX.Element {
           { id: 'total', label: 'Total Laporan', value: rows.length },
         ]}
       />
+      {/* visibleActions dibatasi ke Add/Export/Print SAJA — tombol
+          Change/Delete/Modify/Protect generik sebelumnya tetap tampil
+          (karena `module` diisi) tapi TIDAK melakukan apa-apa saat
+          ditekan (handleRowAction cuma menangani add/export/print),
+          sehingga terlihat seperti "CRUD tidak berfungsi". Modul ini juga
+          tidak punya kolom is_protected/endpoint Protect di backend, dan
+          Edit/Hapus/Inspeksi per baris sudah tersedia lewat ikon di kolom
+          Aksi (hanya untuk laporan berstatus "Menunggu Pengecekan"), jadi
+          toolbar generik cukup diselaraskan ke aksi yang benar-benar
+          berfungsi. */}
       <DataTable
         title="Daftar Laporan Barang Rusak"
         description="Laporan barang rusak/retur — status default 'Menunggu Pengecekan' sampai diperiksa fisik oleh Admin/Super Admin"
@@ -244,6 +307,7 @@ function BarangRusakBody(): React.JSX.Element {
         isLoading={isLoading}
         errorMessage={listErrorMessage(error)}
         onRowAction={handleRowAction}
+        visibleActions={['add', 'export', 'print']}
         module="barang_rusak"
       />
 
@@ -281,6 +345,13 @@ function BarangRusakBody(): React.JSX.Element {
           placeholder="Kondisi kerusakan yang terlihat"
         />
       </Modal>
+      <input
+        ref={fotoInputRef}
+        type="file"
+        accept="image/jpeg,image/jpg,image/png"
+        className="hidden"
+        onChange={handleFotoChange}
+      />
       {exportDialog}
     </PageShell>
   );

@@ -175,6 +175,11 @@ export interface RawAsset {
   longitude?: number | null;
   status: 'aktif' | 'rusak' | 'nonaktif';
   keterangan?: string;
+  ipAddress?: string;
+  pingStatus?: 'online' | 'offline' | 'unknown';
+  lastPingAt?: string | null;
+  parentAssetId?: number | null;
+  jumlahPort?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -187,6 +192,7 @@ export interface RawBarangRusak {
   labelBarang: string;
   namaBarang: string;
   keterangan?: string;
+  fotoUrl?: string;
   jenisBarang?: 'retur' | 'rusak' | '';
   status: 'pengecekan' | 'retur' | 'rusak';
   dilaporkanOleh: number;
