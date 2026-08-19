@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
-import { RefreshCw, X, Pencil, Trash2, Network, History } from 'lucide-react';
+import { RefreshCw, X, Pencil, Trash2, Network, History, AlertTriangle, BellRing, BellOff, Radio, MapPinned, Boxes, Users } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Card } from '@/component/ui/Card';
 import { Badge } from '@/component/ui/Badge';
@@ -11,7 +11,7 @@ import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
 import { ASSET_STATUS_META, PING_STATUS_META } from '@/lib/utils/status';
-import { assetsApi, assetPortApi, assetHistoryApi, type AssetMapPoint, type AssetPortItem, type AssetHistoryEntry } from '@/lib/api/modules';
+import { assetsApi, assetPortApi, assetHistoryApi, itemsApi, type AssetMapPoint, type AssetPortItem, type AssetHistoryEntry } from '@/lib/api/modules';
 import { friendlyError } from '@/lib/utils/errors';
 import type { JenisAset, AssetStatus } from '@/types';
 
@@ -60,6 +60,39 @@ function formatMarkerLabel(point: AssetMapPoint): string {
   return `${point.gudangNama.toLowerCase()}(${tipeLabel}) - RSD - ${noUrut}`;
 }
 
+/**
+ * Bunyi alarm singkat pakai Web Audio API (osilator), TANPA butuh file
+ * audio eksternal — dua nada pendek naik-turun meniru bip alarm
+ * monitoring jaringan. Dibungkus try/catch karena AudioContext bisa
+ * gagal di beberapa browser/kondisi (mis. belum ada interaksi user).
+ */
+function playAlarmBeep(): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- webkitAudioContext fallback Safari lama
+    const Ctx: any = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const now = ctx.currentTime;
+    [880, 660].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = freq;
+      const start = now + i * 0.18;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.18);
+    });
+    window.setTimeout(() => ctx.close(), 500);
+  } catch {
+    // Diamkan — alarm visual (badge merah, marker berdenyut) tetap tampil
+    // walau bunyi gagal diputar.
+  }
+}
+
 function AssetTrackingMapBody(): React.JSX.Element {
   const { user } = useAuth();
   const confirm = useConfirm();
@@ -74,12 +107,33 @@ function AssetTrackingMapBody(): React.JSX.Element {
   const [showPortPanel, setShowPortPanel] = useState(false);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [pingingId, setPingingId] = useState<number | null>(null);
+  // Alarm ala "The Dude": daftar aset yang lagi down (pingStatus
+  // 'offline') ditampilkan di panel terpisah + bunyi alarm singkat saat
+  // ADA aset yang BARU SAJA turun (bukan tiap render, biar tidak berisik
+  // untuk aset yang memang sudah lama down). `alarmMuted` supaya operator
+  // bisa mematikan bunyinya tanpa kehilangan indikator visualnya.
+  const [alarmMuted, setAlarmMuted] = useState(false);
+  const knownDownIdsRef = useRef<Set<number> | null>(null);
+  // Status Live: jam berjalan (mirip "STATUS · LIVE 12:04" ala Fibero) +
+  // total SKU barang gudang (dari modul Kelola Barang, BUKAN aset
+  // jaringan) — dua-duanya dipakai widget Live Status di bawah, lihat
+  // catatan lengkap di JSX-nya.
+  const [liveClock, setLiveClock] = useState('');
+  const [totalBarang, setTotalBarang] = useState<number | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tipe Leaflet.DivIcon, hanya tersedia lewat dynamic import di client
   const [leafletIcons, setLeafletIcons] = useState<Record<string, any> | null>(null);
+  // Varian ikon KHUSUS untuk aset yang sedang down (pingStatus 'offline')
+  // — cincin bayangan merah berdenyut (animate-wms-alarm-pulse) + tepi
+  // merah, meniru indikator alarm ala monitoring The Dude/MikroTik. Warna
+  // & singkatan dasar per jenis aset TETAP SAMA (lihat catatan di atas),
+  // ini cuma overlay peringatan di sekitarnya.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sama seperti leafletIcons
+  const [leafletIconsDown, setLeafletIconsDown] = useState<Record<string, any> | null>(null);
 
   useEffect(() => {
     import('leaflet').then((L) => {
       const icons: Record<string, L.DivIcon> = {};
+      const iconsDown: Record<string, L.DivIcon> = {};
       Object.keys(JENIS_MARKER_META).forEach((jenis) => {
         const meta = JENIS_MARKER_META[jenis];
         icons[jenis] = L.divIcon({
@@ -89,9 +143,18 @@ function AssetTrackingMapBody(): React.JSX.Element {
           iconAnchor: [17, 17],
           popupAnchor: [0, -17],
         });
+        iconsDown[jenis] = L.divIcon({
+          className: '',
+          html: `<div class="animate-wms-alarm-pulse" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9999px;background:${meta.color};color:#fff;font-size:9px;font-weight:700;border:2px solid #dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.55),0 1px 4px rgba(0,0,0,.35);">${meta.abbr}</div>`,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+          popupAnchor: [0, -17],
+        });
       });
       // eslint-disable-next-line react-hooks/set-state-in-effect -- inisialisasi ikon sekali setelah leaflet ter-import di client
       setLeafletIcons(icons);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sama seperti di atas
+      setLeafletIconsDown(iconsDown);
     });
   }, []);
 
@@ -107,10 +170,106 @@ function AssetTrackingMapBody(): React.JSX.Element {
     }
   }
 
+  // Refresh senyap (tanpa spinner isLoading) dipakai polling berkala —
+  // backend sudah punya scheduler ping otomatis (lihat
+  // StartAutoPingScheduler di gowms), jadi halaman ini cukup menarik
+  // ulang datanya secara berkala supaya status online/offline & alarm
+  // ter-update sendiri tanpa operator harus refresh manual.
+  async function refreshPointsSilently(): Promise<void> {
+    try {
+      const res = await assetsApi.map();
+      setAllPoints(res);
+    } catch {
+      // Diamkan — kegagalan polling latar belakang tidak perlu toast
+      // berulang tiap 20 detik, cukup coba lagi di siklus berikutnya.
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loadPoints async
     loadPoints();
   }, []);
+
+  // Monitoring kontinu sisi frontend: polling tiap 20 detik supaya
+  // marker & panel alarm di halaman ini ikut ter-update walau operator
+  // tidak menekan apa pun — melengkapi sweep ping otomatis di backend.
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      refreshPointsSilently();
+    }, 20000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  // Deteksi aset yang BARU SAJA berubah jadi offline dibanding
+  // pembacaan sebelumnya -> bunyikan alarm (kalau tidak di-mute) &
+  // tampilkan toast peringatan. Baseline pertama (knownDownIdsRef masih
+  // null) TIDAK memicu bunyi — supaya tidak "kaget" alarm massal saat
+  // halaman baru dibuka dan sudah ada aset yang lama down.
+  useEffect(() => {
+    const currentDownIds = new Set(
+      allPoints.filter((p) => p.pingStatus === 'offline').map((p) => p.id),
+    );
+    if (knownDownIdsRef.current) {
+      const newlyDown = allPoints.filter(
+        (p) => p.pingStatus === 'offline' && !knownDownIdsRef.current!.has(p.id),
+      );
+      if (newlyDown.length > 0) {
+        if (!alarmMuted) playAlarmBeep();
+        newlyDown.forEach((p) => {
+          toast.error(`⚠ ${p.labelRsd} terdeteksi DOWN — cek koneksi/perangkat.`);
+        });
+      }
+    }
+    knownDownIdsRef.current = currentDownIds;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sengaja cuma reaktif ke allPoints; alarmMuted dibaca lewat closure terbaru tiap render
+  }, [allPoints]);
+
+  const downPoints = useMemo(() => allPoints.filter((p) => p.pingStatus === 'offline'), [allPoints]);
+
+  // Jam berjalan untuk widget "STATUS · LIVE" — update tiap detik cukup di
+  // client, tidak perlu ke server.
+  useEffect(() => {
+    function tick(): void {
+      setLiveClock(
+        new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      );
+    }
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Total SKU di Kelola Barang — cuma dibutuhkan angkanya (pageSize:1
+  // masih mengembalikan `total` hasil hitung backend), dipakai baris
+  // "Aset Barang" di widget Live Status supaya ikut merepresentasikan
+  // aset PERUSAHAAN secara utuh (bukan cuma perangkat jaringan), sesuai
+  // permintaan. Diambil sekali saat halaman dibuka, bukan tiap polling
+  // 20 detik (stok gudang tidak seperti status ping yang perlu real-time).
+  useEffect(() => {
+    itemsApi
+      .list({ pageSize: 1 })
+      .then((res) => setTotalBarang(res.total))
+      .catch(() => setTotalBarang(null));
+  }, []);
+
+  // Metrik ringkas ala "STATUS · LIVE" referensi Fibero, TAPI disesuaikan
+  // ke konsep aset PERUSAHAAN di aplikasi ini (bukan panel ISP pelanggan
+  // internet) — lihat catatan di JSX widget-nya untuk kenapa "Tiket
+  // SLA"/"RADIUS"/"Tagihan" ala referensi TIDAK ditiru mentah-mentah:
+  // modul itu tidak ada di WMS-RSD, jadi diganti ukuran yang benar-benar
+  // dipunyai aplikasi ini.
+  const liveStats = useMemo(() => {
+    const totalPelangganPort = allPoints.reduce((sum, p) => sum + (p.portTerisi ?? 0), 0);
+    const assetsWithIp = allPoints.filter((p) => p.ipAddress);
+    const onlineCount = assetsWithIp.filter((p) => p.pingStatus === 'online').length;
+    const konektivitasPct = assetsWithIp.length > 0 ? (onlineCount / assetsWithIp.length) * 100 : null;
+    return {
+      totalPeta: allPoints.length,
+      totalPelangganPort,
+      konektivitasPct,
+      assetsWithIpCount: assetsWithIp.length,
+    };
+  }, [allPoints]);
 
   const points = useMemo(
     () =>
@@ -199,10 +358,137 @@ function AssetTrackingMapBody(): React.JSX.Element {
             label: ASSET_STATUS_META[s].label,
             value: countByStatus[s] ?? 0,
           })),
+          { id: 'down', label: 'Down / Bermasalah', value: downPoints.length },
         ]}
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr]">
+      {/* Panel Alarm — meniru daftar "Down" ala monitoring The Dude
+          (MikroTik): semua aset yang sedang tidak merespon ping,
+          diperbarui otomatis lewat polling di atas + sweep ping berkala
+          di backend. Bunyi alarm hanya untuk transisi BARU jadi down
+          (lihat efek deteksi di atas), tapi daftar ini SELALU tampil
+          selama masih ada aset offline supaya operator tidak perlu
+          menunggu bunyi untuk tahu ada gangguan aktif. */}
+      {downPoints.length > 0 ? (
+        <div className="mt-4 rounded-lg border border-dangerText/30 bg-dangerBg/60 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-dangerText">
+              <AlertTriangle className="h-4 w-4 animate-pulse" />
+              <span className="text-sm font-bold">
+                {downPoints.length} aset sedang DOWN — segera cek koneksi/perangkat
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAlarmMuted((prev) => !prev)}
+              className="flex items-center gap-1.5 rounded-full border border-dangerText/40 bg-panel px-3 py-1 text-xs font-semibold text-dangerText hover:bg-dangerBg"
+              title={alarmMuted ? 'Nyalakan bunyi alarm' : 'Bisukan bunyi alarm'}
+            >
+              {alarmMuted ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
+              {alarmMuted ? 'Alarm Dibisukan' : 'Alarm Aktif'}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-col divide-y divide-dangerText/15">
+            {downPoints.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  setSelectedPoint(p);
+                  setShowPortPanel(false);
+                  setShowHistoryPanel(false);
+                }}
+                className="flex items-center justify-between gap-3 py-2 text-left text-xs hover:bg-panel/60"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 flex-shrink-0 rounded-full bg-dangerText" />
+                  <span className="font-semibold text-text">{formatMarkerLabel(p)}</span>
+                  <span className="text-textMuted">({p.ipAddress || 'tanpa IP'})</span>
+                </span>
+                <span className="text-dangerText">Offline</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Widget "STATUS · LIVE" — terinspirasi panel status Fibero (lihat
+          referensi), TAPI baris-barisnya diganti ke ukuran yang benar-benar
+          dipunyai WMS-RSD, bukan ditiru mentah dari referensi ISP: Fibero
+          menampilkan "Tiket · SLA dekat", "RADIUS", "Tagihan" karena itu
+          aplikasi ISP dengan modul tiket/RADIUS-auth/billing pelanggan
+          internet — WMS-RSD TIDAK punya modul-modul itu. Baris yang
+          ditampilkan di sini murni dari data yang sungguh ada:
+            - Peta: total titik aset yang terpetakan (allPoints)
+            - Pelanggan: total PORT TERISI di seluruh ODC/ODP (portTerisi),
+              konsep "pelanggan tersambung" yang memang ada di skema aset
+            - Konektivitas: persentase aset ber-IP yang online (dari sweep
+              ping otomatis, backend & polling 20 detik di atas) — padanan
+              paling jujur untuk "RADIUS 99,7%" referensi (uptime), karena
+              app ini tidak punya server RADIUS sungguhan
+            - Aset Barang: total SKU di Kelola Barang, supaya "aset
+              perusahaan" di sini juga mencakup aset FISIK gudang, bukan
+              cuma perangkat jaringan — sesuai permintaan eksplisit. */}
+      <Card className="mt-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wide text-textMuted">Status · Live</span>
+          <span className="flex items-center gap-1.5 font-mono text-xs text-textMuted">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-successText" />
+            {liveClock}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
+            <MapPinned className="h-4 w-4 flex-shrink-0 text-accentDark" />
+            <div className="flex flex-col">
+              <span className="text-[11px] text-textMuted">Peta</span>
+              <span className="text-sm font-bold text-text">{liveStats.totalPeta} titik</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
+            <Users className="h-4 w-4 flex-shrink-0 text-accentDark" />
+            <div className="flex flex-col">
+              <span className="text-[11px] text-textMuted">Pelanggan</span>
+              <span className="text-sm font-bold text-text">{liveStats.totalPelangganPort} tersambung</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
+            <Radio
+              className={`h-4 w-4 flex-shrink-0 ${
+                liveStats.konektivitasPct === null
+                  ? 'text-textMuted'
+                  : liveStats.konektivitasPct >= 95
+                    ? 'text-successText'
+                    : liveStats.konektivitasPct >= 80
+                      ? 'text-amber-600'
+                      : 'text-dangerText'
+              }`}
+            />
+            <div className="flex flex-col">
+              <span className="text-[11px] text-textMuted">Konektivitas</span>
+              <span className="text-sm font-bold text-text">
+                {liveStats.konektivitasPct === null
+                  ? 'Belum ada IP'
+                  : `${liveStats.konektivitasPct.toFixed(1)}%`}
+              </span>
+            </div>
+          </div>
+          <a
+            href="/kelola-barang"
+            className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2 transition-colors hover:border-accent"
+          >
+            <Boxes className="h-4 w-4 flex-shrink-0 text-accentDark" />
+            <div className="flex flex-col">
+              <span className="text-[11px] text-textMuted">Aset Barang</span>
+              <span className="text-sm font-bold text-text">
+                {totalBarang === null ? '—' : `${totalBarang} SKU`}
+              </span>
+            </div>
+          </a>
+        </div>
+      </Card>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr]">
         <div className="flex flex-col gap-4">
           {/* Panel Layer & Status — terinspirasi panel kiri referensi Fibero. */}
           <Card className="flex flex-col gap-4">
@@ -331,7 +617,11 @@ function AssetTrackingMapBody(): React.JSX.Element {
                   <Marker
                     key={point.id}
                     position={[point.latitude, point.longitude]}
-                    icon={leafletIcons[point.jenisAset] ?? leafletIcons.tiang}
+                    icon={
+                      point.pingStatus === 'offline'
+                        ? (leafletIconsDown?.[point.jenisAset] ?? leafletIcons[point.jenisAset] ?? leafletIcons.tiang)
+                        : (leafletIcons[point.jenisAset] ?? leafletIcons.tiang)
+                    }
                     eventHandlers={{
                       click: () => {
                         setSelectedPoint(point);
@@ -342,6 +632,7 @@ function AssetTrackingMapBody(): React.JSX.Element {
                   >
                     <Tooltip direction="top" offset={[0, -17]}>
                       {formatMarkerLabel(point)}
+                      {point.pingStatus === 'offline' ? ' — ⚠ DOWN' : ''}
                     </Tooltip>
                   </Marker>
                 ))}
@@ -425,7 +716,7 @@ function AssetTrackingMapBody(): React.JSX.Element {
               </button>
             ) : null}
             <a
-              href="/home/aset-gudang"
+              href="/aset-gudang"
               className="flex items-center gap-1.5 rounded-md border border-borderSoft px-3 py-1.5 text-xs font-semibold text-text hover:border-accent"
             >
               <Pencil className="h-3.5 w-3.5" /> Ubah di Manajemen Aset

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useAuth } from '@/auth/AuthContext';
 import { maintenanceApi, type MaintenanceStatus } from '@/lib/api/modules';
+import { StatusScreen } from '@/component/system/StatusScreen';
 import type { UserRole } from '@/types';
 
 interface RoleGuardProps {
@@ -73,7 +74,7 @@ function MaintenanceBlockedScreen({ status }: { status: MaintenanceStatus }): Re
 }
 
 export function RoleGuard({ children, allowedRoles }: RoleGuardProps): React.JSX.Element | null {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, serverUnreachable } = useAuth();
   const router = useRouter();
   const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
   const wasActiveRef = useRef(false);
@@ -82,14 +83,21 @@ export function RoleGuard({ children, allowedRoles }: RoleGuardProps): React.JSX
     if (isLoading) {
       return;
     }
+    // Backend tidak bisa dihubungi (5xx/gagal jaringan) BUKAN "belum
+    // login" — jangan lempar ke /login (bisa bikin user login ulang
+    // sia-sia padahal sesinya masih sah), biarkan render StatusScreen 503
+    // di bawah sampai backend pulih lagi.
+    if (serverUnreachable) {
+      return;
+    }
     if (!user) {
       router.replace('/login');
       return;
     }
     if (allowedRoles && !allowedRoles.includes(user.role)) {
-      router.replace('/home/dashboard');
+      router.replace('/status/403');
     }
-  }, [isLoading, user, allowedRoles, router]);
+  }, [isLoading, user, allowedRoles, router, serverUnreachable]);
 
   useEffect(() => {
     if (!user || user.role === 'super_admin') {
@@ -133,6 +141,16 @@ export function RoleGuard({ children, allowedRoles }: RoleGuardProps): React.JSX
       window.clearTimeout(timeoutId);
     };
   }, [user]);
+
+  if (serverUnreachable) {
+    return (
+      <StatusScreen
+        code="503"
+        message="Server tidak bisa dihubungi. Sesi kamu tetap aman — halaman ini akan pulih otomatis begitu server kembali online."
+        actions={[{ label: 'Coba Lagi', onClick: () => window.location.reload(), variant: 'primary' }]}
+      />
+    );
+  }
 
   if (isLoading || !user) {
     return (

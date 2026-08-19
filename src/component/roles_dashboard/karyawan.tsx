@@ -16,10 +16,10 @@ import { listErrorMessage } from '@/lib/utils/errors';
 import type { BarangRusak, Delivery } from '@/types';
 
 const QUICK_ACTIONS = [
-  { label: 'Input Barang Masuk', href: '/home/barang-masuk' },
-  { label: 'Input Barang Keluar', href: '/home/barang-keluar' },
-  { label: 'Submit Stok Opname', href: '/home/inventory' },
-  { label: 'Lihat Kelola Barang', href: '/home/kelola-barang' },
+  { label: 'Input Barang Masuk', href: '/(app)/barang-masuk' },
+  { label: 'Input Barang Keluar', href: '/(app)/barang-keluar' },
+  { label: 'Submit Stok Opname', href: '/(app)/inventory' },
+  { label: 'Lihat Kelola Barang', href: '/(app)/kelola-barang' },
 ];
 
 /**
@@ -158,7 +158,7 @@ function HandledDeliveriesCard({ deliveries, isLoading, errorMessage }: HandledD
           <h2 className="text-base font-semibold text-text">Pengiriman yang Saya Tangani</h2>
           <p className="text-xs text-textMuted">Status real-time dari resi yang kamu proses</p>
         </div>
-        <Link href="/home/delivery-monitoring" className="text-xs font-semibold text-accent hover:underline">
+        <Link href="/(app)/delivery-monitoring" className="text-xs font-semibold text-accent hover:underline">
           Buka Monitoring Pengiriman
         </Link>
       </div>
@@ -215,7 +215,7 @@ function MyLaporanRusakCard({ laporan, isLoading, errorMessage }: MyLaporanRusak
         <p className="text-xs text-textMuted">Status pengecekan terbaru dari laporan yang kamu buat</p>
       </div>
       {body}
-      <Link href="/home/barang-rusak" className="text-right text-xs font-semibold text-accent hover:underline">
+      <Link href="/(app)/barang-rusak" className="text-right text-xs font-semibold text-accent hover:underline">
         Lihat semua laporan
       </Link>
     </Card>
@@ -265,7 +265,7 @@ function ScheduledPickupsCard({ deliveries, isLoading }: ScheduledPickupsCardPro
     <Card className="flex flex-col gap-4">
       <h2 className="text-base font-semibold text-text">Pickup &amp; Dropoff Terjadwal</h2>
       {body}
-      <Link href="/home/pickup-dropoff" className="text-right text-xs font-semibold text-accent hover:underline">
+      <Link href="/(app)/pickup-dropoff" className="text-right text-xs font-semibold text-accent hover:underline">
         Lihat semua jadwal
       </Link>
     </Card>

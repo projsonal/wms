@@ -24,16 +24,8 @@ import type { RawBarangKeluar } from '@/lib/api/raw-types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
 interface ItemRow {
-  /** ID unik sisi klien — lihat catatan panjang di GoodsIn.tsx ItemRow.key
-   * soal kenapa ini WAJIB, bukan cuma soal gaya (SonarQube S6479). */
   key: string;
   barangId: string;
-  /** Opsional — rak ASAL pengambilan barang, mengurangi Rak.Terisi rak itu
-   * sebesar qty saat dokumen diselesaikan (lihat catatan RakID di
-   * GoodsIn.tsx, konsepnya sama tapi arah sebaliknya). Rak di sini TIDAK
-   * dikaitkan ke SKU tertentu (lihat model.Rak backend — kapasitas/terisi
-   * murni angka unit generik per rak, bukan per barang), jadi operator
-   * cukup pilih rak fisik tempat dia mengambil barang, apa pun jenisnya. */
   rakId: string;
   qty: number;
 }
@@ -72,6 +64,7 @@ export function BarangKeluarContent(): React.JSX.Element {
   const rows = data?.data ?? [];
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [gudangId, setGudangId] = useState('');
   const [tanggal, setTanggal] = useState('');
@@ -79,8 +72,18 @@ export function BarangKeluarContent(): React.JSX.Element {
   const [penerima, setPenerima] = useState('');
   const [itemRows, setItemRows] = useState<ItemRow[]>([{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
 
-  // Sama pola dengan BarangMasuk.tsx: daftar rak KHUSUS gudang asal yang
-  // dipilih, reset tiap kali gudang berganti (lihat handleGudangChange).
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   const { data: rakListResult } = useSWR(
     gudangId ? ['racks-for-goods-out', gudangId] : null,
     () => rakApi.list(Number(gudangId), { pageSize: 200 }),
@@ -96,11 +99,32 @@ export function BarangKeluarContent(): React.JSX.Element {
   }
 
   function openCreateModal(): void {
+    setEditingId(null);
     setGudangId('');
     setTanggal(new Date().toISOString().slice(0, 10));
     setKeperluan('');
     setPenerima('');
     setItemRows([{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
+    setIsModalOpen(true);
+  }
+
+  function openEditModal(row: RawBarangKeluar): void {
+    if (row.status !== 'draft') {
+      toast.error('Hanya dokumen berstatus draft yang bisa diubah.');
+      return;
+    }
+    setEditingId(String(row.id));
+    setGudangId(String(row.gudangId));
+    setTanggal(row.tanggal ? row.tanggal.slice(0, 10) : '');
+    setKeperluan(row.keperluan ?? '');
+    setPenerima(row.penerima ?? '');
+    const rowsFromDoc = (row.items ?? []).map((it) => ({
+      key: nextRowKey(),
+      barangId: String(it.barangId),
+      rakId: it.rakId ? String(it.rakId) : '',
+      qty: it.qty ?? 1,
+    }));
+    setItemRows(rowsFromDoc.length > 0 ? rowsFromDoc : [{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
     setIsModalOpen(true);
   }
 
@@ -124,7 +148,7 @@ export function BarangKeluarContent(): React.JSX.Element {
     }
     setIsSaving(true);
     try {
-      await goodsOutApi.create({
+      const payload = {
         gudang_id: Number(gudangId),
         tanggal,
         keperluan,
@@ -134,12 +158,19 @@ export function BarangKeluarContent(): React.JSX.Element {
           rak_id: r.rakId ? Number(r.rakId) : undefined,
           qty: r.qty,
         })),
-      });
-      toast.success('Dokumen barang keluar berhasil dibuat (status: draft).');
+      };
+      if (editingId) {
+        await goodsOutApi.update(editingId, payload);
+        toast.success('Dokumen barang keluar berhasil diubah.');
+      } else {
+        await goodsOutApi.create(payload);
+        toast.success('Dokumen barang keluar berhasil dibuat (status: draft).');
+      }
       setIsModalOpen(false);
+      setEditingId(null);
       await mutate();
     } catch (err) {
-      toast.error(friendlyError(err, 'Gagal membuat dokumen barang keluar.'));
+      toast.error(friendlyError(err, editingId ? 'Gagal mengubah dokumen barang keluar.' : 'Gagal membuat dokumen barang keluar.'));
     } finally {
       setIsSaving(false);
     }
@@ -217,11 +248,69 @@ export function BarangKeluarContent(): React.JSX.Element {
     requestExport(rows, BK_EXPORT_COLUMNS, 'daftar-barang-keluar', BK_PDF_META);
   }
 
+  async function handleBulkChange(selectedRows: RawBarangKeluar[]): Promise<void> {
+    if (!isBulkMode) {
+      toast('Aktifkan "Modify" dulu untuk memilih satu dokumen draft yang mau diubah.');
+      return;
+    }
+    if (selectedRows.length !== 1) {
+      toast('Pilih tepat SATU dokumen draft untuk diubah.');
+      return;
+    }
+    openEditModal(selectedRows[0]);
+  }
+
+  async function handleBulkDelete(selectedRows: RawBarangKeluar[]): Promise<void> {
+    if (!isBulkMode || selectedRows.length === 0) {
+      toast('Aktifkan "Modify" dulu, lalu pilih satu atau beberapa dokumen draft yang mau dihapus.');
+      return;
+    }
+    const nonDraft = selectedRows.filter((r) => r.status !== 'draft');
+    if (nonDraft.length > 0) {
+      toast.error('Hanya dokumen berstatus draft yang bisa dihapus — batalkan pilihan pada dokumen selesai/dibatalkan.');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Hapus Dokumen Terpilih',
+      message: `Apakah yakin ingin menghapus ${selectedRows.length} dokumen draft terpilih?`,
+      confirmLabel: 'Ya, Hapus',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await Promise.all(selectedRows.map((r) => goodsOutApi.remove(String(r.id))));
+      toast.success(`${selectedRows.length} dokumen berhasil dihapus.`);
+      setSelectedIds(new Set());
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Sebagian/semua dokumen gagal dihapus.'));
+    }
+  }
+
   async function handleRowAction(action: TableRowAction): Promise<void> {
-    if (action === 'add') openCreateModal();
-    if (action === 'export') handleExport();
-    if (action === 'print') {
-      printRowsToPdf(rows, BK_EXPORT_COLUMNS, { ...BK_PDF_META, generatedBy: user?.fullName });
+    const selectedRows = rows.filter((r) => selectedIds.has(String(r.id)));
+    switch (action) {
+      case 'add':
+        openCreateModal();
+        return;
+      case 'export':
+        handleExport();
+        return;
+      case 'print':
+        printRowsToPdf(rows, BK_EXPORT_COLUMNS, { ...BK_PDF_META, generatedBy: user?.fullName });
+        return;
+      case 'modify':
+        setIsBulkMode((prev) => !prev);
+        setSelectedIds(new Set());
+        return;
+      case 'change':
+        await handleBulkChange(selectedRows);
+        return;
+      case 'delete':
+        await handleBulkDelete(selectedRows);
+        return;
+      default:
+        return;
     }
   }
 

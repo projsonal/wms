@@ -56,7 +56,7 @@ function writeIdSet(key: string, ids: Set<string>): void {
   }
 }
 
-export function RecentActivityCard({ items, errorMessage }: RecentActivityCardProps): React.JSX.Element {
+export function RecentActivityCard({ items, errorMessage }: Readonly<RecentActivityCardProps>): React.JSX.Element {
   // Mulai dari Set kosong di server MAUPUN render pertama di client (SAMA
   // PERSIS) supaya tidak ada hydration mismatch — localStorage baru dibaca
   // di dalam useEffect (lihat catatan react-hooks/set-state-in-effect di

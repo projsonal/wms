@@ -166,7 +166,7 @@ export function ItemsManagementContent(): React.JSX.Element {
 
   async function handleReject(row: Item): Promise<void> {
     const reason = window.prompt(`Alasan menolak "${row.name}"? (wajib diisi)`);
-    if (!reason || !reason.trim()) {
+    if (!reason?.trim()) {
       if (reason !== null) toast.error('Alasan penolakan wajib diisi.');
       return;
     }

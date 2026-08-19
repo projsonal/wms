@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AccountLockoutBanner } from '@/component/auth/AccountLockoutBanner';
 import { AuthShell } from '@/component/auth/AuthShell';
@@ -74,6 +75,20 @@ function LoginWizard(): React.JSX.Element {
     }, 1000);
     return () => clearInterval(interval);
   }, [lockoutSeconds]);
+
+  // proxy.ts menandai redirect ke sini dengan ?reason=unauthorized saat
+  // seseorang mencoba buka URL terproteksi (mis. mengetik/mengedit
+  // domain/dashboard langsung) tanpa sesi aktif — tampilkan alasannya
+  // secara eksplisit, bukan cuma diam-diam mendarat di form login tanpa
+  // penjelasan.
+  useEffect(() => {
+    if (searchParams.get('reason') === 'unauthorized') {
+      toast.error('Halaman itu tidak boleh diakses tanpa masuk terlebih dahulu. Silakan masuk kembali.', {
+        duration: 6000,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cukup jalan sekali saat query param pertama kali dibaca
+  }, []);
 
   async function handleCredentialsSubmit(): Promise<void> {
     setFormError(null);
@@ -149,7 +164,7 @@ function LoginWizard(): React.JSX.Element {
     await refreshUser();
     const redirectTarget = searchParams.get('redirect');
     const isSafeRelativePath = redirectTarget?.startsWith('/') && !redirectTarget.startsWith('//');
-    router.push(isSafeRelativePath && redirectTarget ? redirectTarget : '/home/dashboard');
+    router.push(isSafeRelativePath && redirectTarget ? redirectTarget : '/dashboard');
   }
 
   function handleEnterSubmit(): void {

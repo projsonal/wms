@@ -178,7 +178,7 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
                 </ul>
               )}
               <Link
-                href="/home/reports/inventory"
+                href="/reports/rekap-data"
                 className="text-right text-xs font-semibold text-accent hover:underline"
               >
                 Lihat laporan lengkap
@@ -202,4 +202,3 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
     </div>
   );
 }
-

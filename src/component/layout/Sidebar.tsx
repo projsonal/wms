@@ -22,10 +22,10 @@ const COLLAPSED_WIDTH = 76;
 function SidebarBody({
   collapsed,
   onNavigate,
-}: {
+}: Readonly<{
   collapsed: boolean;
   onNavigate?: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const t = useTranslations();
@@ -113,13 +113,13 @@ function SidebarBody({
             kiri saat aktif, terpisah sedikit dari grup Laporan di atasnya. */}
         <div className="mt-4 border-t border-white/10 pt-3">
           <Link
-            href="/home/settings"
+            href="/(app)/settings"
             onClick={onNavigate}
             title={collapsed ? 'Settings' : undefined}
             className={clsx(
               'relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors',
               collapsed && 'justify-center px-0 py-2.5',
-              pathname === '/home/settings' || pathname.startsWith('/home/settings/')
+              pathname === '/(app)/settings' || pathname.startsWith('/(app)/settings/')
                 ? 'bg-accent text-white'
                 : 'text-white/80 hover:bg-white/10 hover:text-white',
             )}
@@ -145,7 +145,7 @@ function SidebarBody({
             memanggil stopPropagation supaya klik Logout tidak ikut memicu
             navigasi ke Settings. */}
         <Link
-          href="/home/settings"
+          href="/(app)/settings"
           onClick={onNavigate}
           title={collapsed ? t('sidebar.settings') : undefined}
           className={clsx(

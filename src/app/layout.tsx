@@ -8,11 +8,6 @@ import { VersionWatcher } from '@/component/system/VersionWatcher';
 import { Toaster } from '@/component/ui/shadcn/sonner';
 import './globals.css';
 
-// Font aplikasi TIDAK lagi bisa dipilih user (opsi "Font Aplikasi" di
-// Settings > Tampilan sudah dihapus) — Inter dipakai tetap di seluruh
-// halaman. next/font/google men-download & self-host font ini saat build
-// (bukan lewat Google Fonts CDN saat runtime), jadi tidak ada request
-// eksternal tambahan / FOUC.
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
 
 export const metadata: Metadata = {
@@ -24,22 +19,11 @@ export const metadata: Metadata = {
   },
 };
 
-// PENTING: tanpa export ini, Next.js TIDAK memasang <meta name="viewport">
-// sama sekali. Browser di HP asli lalu menganggap halaman didesain untuk
-// layar desktop (~980px), me-render di lebar itu, lalu men-scale-down
-// paksa supaya muat — bukan benar-benar layout mobile. Itu sebabnya semua
-// breakpoint Tailwind (sm:/md:/lg:) dan lebar elemen terlihat "berantakan"
-// hanya di HP sungguhan, padahal mode responsive DevTools di laptop selalu
-// terlihat normal (DevTools selalu mengasumsikan viewport meta yang benar).
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
 };
 
-// Dijalankan SEBELUM React hydrate, langsung di <head>, supaya tema
-// gelap/font pilihan user diterapkan sejak render pertama — tanpa ini akan
-// selalu "kedip" terang sesaat sebelum PreferencesProvider sempat jalan
-// (FOUC / flash-of-wrong-theme).
 const applyStoredPreferencesScript = `
 (function () {
   try {
@@ -87,9 +71,6 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
           </AuthProvider>
         </PreferencesProvider>
         <VersionWatcher />
-        {/* Container global untuk semua toast.success/error/dst dari sonner
-            (dipakai di hampir semua halaman) — tanpa ini toast dipanggil tapi
-            tidak pernah benar-benar tampil di layar. */}
         <Toaster position="top-right" richColors closeButton />
       </body>
     </html>

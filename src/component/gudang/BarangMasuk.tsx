@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { toast } from 'sonner';
-import { Trash2, CheckCircle2, XCircle, Plus, X } from 'lucide-react';
+import { Trash2, Pencil, CheckCircle2, XCircle, Plus, X } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
@@ -77,11 +77,26 @@ export function BarangMasukContent(): React.JSX.Element {
   const rows = data?.data ?? [];
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [gudangId, setGudangId] = useState('');
   const [tanggal, setTanggal] = useState('');
   const [catatan, setCatatan] = useState('');
   const [itemRows, setItemRows] = useState<ItemRow[]>([{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
+
+  // Mode "Modify" (bulk select) supaya tombol Change/Delete di action bar
+  // punya konsep "baris terpilih" — sama pola dengan ItemsManagement.tsx.
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // Daftar rak KHUSUS gudang yang dipilih di atas (rak milik gudang lain
   // tidak relevan/tidak valid dipilih di sini). Di-fetch ulang tiap
@@ -105,10 +120,31 @@ export function BarangMasukContent(): React.JSX.Element {
   }
 
   function openCreateModal(): void {
+    setEditingId(null);
     setGudangId('');
     setTanggal(new Date().toISOString().slice(0, 10));
     setCatatan('');
     setItemRows([{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
+    setIsModalOpen(true);
+  }
+
+  function openEditModal(row: RawBarangMasuk): void {
+    if (row.status !== 'Draft') {
+      toast.error('Hanya dokumen berstatus draft yang bisa diubah.');
+      return;
+    }
+    setEditingId(String(row.id));
+    setGudangId(String(row.gudangId));
+    setTanggal(row.tanggal ? row.tanggal.slice(0, 10) : '');
+    setCatatan(row.catatan ?? '');
+    const rowsFromDoc = (row.items ?? []).map((it) => ({
+      key: nextRowKey(),
+      barangId: String(it.barangId),
+      rakId: it.rakId ? String(it.rakId) : '',
+      qty: it.qty ?? 1,
+      hargaSatuan: it.hargaSatuan ?? 0,
+    }));
+    setItemRows(rowsFromDoc.length > 0 ? rowsFromDoc : [{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
     setIsModalOpen(true);
   }
 
@@ -132,7 +168,7 @@ export function BarangMasukContent(): React.JSX.Element {
     }
     setIsSaving(true);
     try {
-      await goodsInApi.create({
+      const payload = {
         gudang_id: Number(gudangId),
         tanggal,
         catatan,
@@ -142,12 +178,19 @@ export function BarangMasukContent(): React.JSX.Element {
           qty: r.qty,
           harga_satuan: r.hargaSatuan,
         })),
-      });
-      toast.success('Dokumen barang masuk berhasil dibuat (status: draft).');
+      };
+      if (editingId) {
+        await goodsInApi.update(editingId, payload);
+        toast.success('Dokumen barang masuk berhasil diubah.');
+      } else {
+        await goodsInApi.create(payload);
+        toast.success('Dokumen barang masuk berhasil dibuat (status: draft).');
+      }
       setIsModalOpen(false);
+      setEditingId(null);
       await mutate();
     } catch (err) {
-      toast.error(friendlyError(err, 'Gagal membuat dokumen barang masuk.'));
+      toast.error(friendlyError(err, editingId ? 'Gagal mengubah dokumen barang masuk.' : 'Gagal membuat dokumen barang masuk.'));
     } finally {
       setIsSaving(false);
     }
@@ -224,15 +267,89 @@ export function BarangMasukContent(): React.JSX.Element {
     requestExport(rows, BM_EXPORT_COLUMNS, 'daftar-barang-masuk', BM_PDF_META);
   }
 
+  async function handleBulkChange(selectedRows: RawBarangMasuk[]): Promise<void> {
+    if (!isBulkMode) {
+      toast('Aktifkan "Modify" dulu untuk memilih satu dokumen draft yang mau diubah.');
+      return;
+    }
+    if (selectedRows.length !== 1) {
+      toast('Pilih tepat SATU dokumen draft untuk diubah.');
+      return;
+    }
+    openEditModal(selectedRows[0]);
+  }
+
+  async function handleBulkDelete(selectedRows: RawBarangMasuk[]): Promise<void> {
+    if (!isBulkMode || selectedRows.length === 0) {
+      toast('Aktifkan "Modify" dulu, lalu pilih satu atau beberapa dokumen draft yang mau dihapus.');
+      return;
+    }
+    const nonDraft = selectedRows.filter((r) => r.status !== 'Draft');
+    if (nonDraft.length > 0) {
+      toast.error('Hanya dokumen berstatus draft yang bisa dihapus — batalkan pilihan pada dokumen selesai/dibatalkan.');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Hapus Dokumen Terpilih',
+      message: `Apakah yakin ingin menghapus ${selectedRows.length} dokumen draft terpilih?`,
+      confirmLabel: 'Ya, Hapus',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await Promise.all(selectedRows.map((r) => goodsInApi.remove(String(r.id))));
+      toast.success(`${selectedRows.length} dokumen berhasil dihapus.`);
+      setSelectedIds(new Set());
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Sebagian/semua dokumen gagal dihapus.'));
+    }
+  }
+
   async function handleRowAction(action: TableRowAction): Promise<void> {
-    if (action === 'add') openCreateModal();
-    if (action === 'export') handleExport();
-    if (action === 'print') {
-      printRowsToPdf(rows, BM_EXPORT_COLUMNS, { ...BM_PDF_META, generatedBy: user?.fullName });
+    const selectedRows = rows.filter((r) => selectedIds.has(String(r.id)));
+    switch (action) {
+      case 'add':
+        openCreateModal();
+        return;
+      case 'export':
+        handleExport();
+        return;
+      case 'print':
+        printRowsToPdf(rows, BM_EXPORT_COLUMNS, { ...BM_PDF_META, generatedBy: user?.fullName });
+        return;
+      case 'modify':
+        setIsBulkMode((prev) => !prev);
+        setSelectedIds(new Set());
+        return;
+      case 'change':
+        await handleBulkChange(selectedRows);
+        return;
+      case 'delete':
+        await handleBulkDelete(selectedRows);
+        return;
+      default:
+        return;
     }
   }
 
   const columns: DataTableColumn<RawBarangMasuk>[] = [
+    ...(isBulkMode
+      ? [
+          {
+            key: 'select',
+            header: '',
+            render: (row: RawBarangMasuk) => (
+              <input
+                type="checkbox"
+                checked={selectedIds.has(String(row.id))}
+                onChange={() => toggleSelected(String(row.id))}
+                className="h-4 w-4"
+              />
+            ),
+          } satisfies DataTableColumn<RawBarangMasuk>,
+        ]
+      : []),
     { key: 'date', header: 'Tanggal', render: (row) => formatDate(row.tanggal) },
     { key: 'code', header: 'Nomor Penerimaan', render: (row) => row.nomorPenerimaan },
     { key: 'gudang', header: 'Gudang', render: (row) => row.gudang?.nama ?? '-' },
@@ -279,6 +396,16 @@ export function BarangMasukContent(): React.JSX.Element {
               </button>
             </>
           ) : null}
+          {row.status === 'Draft' && canEditBM ? (
+            <button
+              type="button"
+              onClick={() => openEditModal(row)}
+              title="Ubah"
+              className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
           {row.status === 'Draft' && isStaff ? (
             <button
               type="button"
@@ -315,23 +442,28 @@ export function BarangMasukContent(): React.JSX.Element {
           geser (TableRowActionBar, tombol "Add") di dalam tabel. */}
       <DataTable
         title="Riwayat Barang Masuk"
-        description="Catatan penerimaan barang ke gudang"
+        description={
+          isBulkMode
+            ? `Mode Modify aktif — ${selectedIds.size} dokumen terpilih. Pilih baris lalu pakai Change/Delete di atas.`
+            : 'Catatan penerimaan barang ke gudang'
+        }
         columns={columns}
         rows={rows}
         getRowId={(row) => String(row.id)}
         isLoading={isLoading}
         onRowAction={handleRowAction}
         module="barang_masuk"
-        /* Barang Masuk adalah dokumen berstatus (draft/selesai/dibatalkan),
-         * BUKAN katalog yang barisnya diedit bebas — makanya cuma
-         * Add/Export/Print yang punya aksi nyata di toolbar. Change,
-         * Delete, Modify, Protect butuh konsep "baris terpilih" yang
-         * tabel ini tidak punya; sebelumnya tombol itu tetap tampil tapi
-         * onClick-nya no-op (handleRowAction tidak menanganinya) —
-         * makanya kelihatan "tidak berfungsi". Aksi ubah status per baris
-         * (Selesaikan/Batalkan) & hapus draft sudah ada lewat ikon di
-         * kolom paling kanan tabel. */
-        visibleActions={['add', 'export', 'print']}
+        /* Barang Masuk adalah dokumen berstatus (draft/selesai/dibatalkan).
+         * Change/Delete kini aktif lewat mode "Modify" (centang baris di
+         * kolom kiri, sama pola dengan Kelola Barang) — TAPI cuma untuk
+         * dokumen berstatus draft (dokumen selesai/dibatalkan sudah final,
+         * konsisten dengan aturan backend di goodsInApi.remove). "Protect"
+         * SENGAJA tidak ditampilkan: modul ini tidak punya kolom
+         * is_protected/endpoint Protect di backend (lihat
+         * internal/model/barang_masuk.go), beda dengan barang.go yang
+         * memangnya punya. Aksi ubah status per baris (Selesaikan/
+         * Batalkan) tetap ada lewat ikon di kolom paling kanan tabel. */
+        visibleActions={['add', 'change', 'delete', 'export', 'print', 'modify']}
         toolbar={
           <Select
             value={kategoriId}
@@ -345,15 +477,24 @@ export function BarangMasukContent(): React.JSX.Element {
 
       <Modal
         isOpen={isModalOpen}
-        title="Tambah Barang Masuk"
-        onClose={() => setIsModalOpen(false)}
+        title={editingId ? 'Ubah Barang Masuk' : 'Tambah Barang Masuk'}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingId(null);
+        }}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setIsModalOpen(false);
+                setEditingId(null);
+              }}
+            >
               Batal
             </Button>
             <Button onClick={handleSave} loading={isSaving}>
-              Simpan (Draft)
+              {editingId ? 'Simpan Perubahan' : 'Simpan (Draft)'}
             </Button>
           </>
         }
