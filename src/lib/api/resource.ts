@@ -14,9 +14,7 @@ function buildQuery(params: ListParams = {}): string {
     if (value === undefined || value === '') {
       return;
     }
-    // Backend gostock (pkg/utils/pagination.go) membaca `limit`, bukan
-    // `pageSize` — nama field TS tetap `pageSize` demi konsistensi dengan
-    // PaginatedResult, tapi di query string diterjemahkan ke `limit`.
+
     const queryKey = key === 'pageSize' ? 'limit' : key;
     searchParams.set(queryKey, String(value));
   });
@@ -24,15 +22,6 @@ function buildQuery(params: ListParams = {}): string {
   return query ? `?${query}` : '';
 }
 
-/**
- * Membuat kumpulan fungsi CRUD standar untuk sebuah resource REST.
- * Menghindari duplikasi boilerplate fetch di setiap modul (barang, supplier, dst).
- *
- * Catatan bentuk respons backend gostock: endpoint list membalas
- * `{ data: [...], meta: { page, limit, totalItems, totalPages } }` — info
- * paginasi ada di `meta`, BUKAN di dalam `data`. Fungsi ini yang merangkai
- * keduanya jadi bentuk `PaginatedResult<T>` yang dipakai komponen UI.
- */
 export function createResourceApi<TEntity, TCreatePayload = Partial<TEntity>>(basePath: string) {
   return {
     list: async (params?: ListParams): Promise<PaginatedResult<TEntity>> => {

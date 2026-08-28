@@ -43,22 +43,12 @@ export function RekapDataContent(): React.JSX.Element {
       { kategori: 'Kelola Barang', item: 'Stok menipis', nilai: formatNumber(summary.kelolaBarang.stokMenipis) },
       { kategori: 'Kelola Barang', item: 'Total nilai inventaris', nilai: formatCurrency(summary.kelolaBarang.totalNilaiInventaris) },
       { kategori: 'Gudang', item: 'Total gudang', nilai: formatNumber(summary.gudang.totalGudang) },
-      { kategori: 'Gudang', item: 'Total rak', nilai: formatNumber(summary.gudang.totalRak) },
-      { kategori: 'Gudang', item: 'Rak penuh', nilai: formatNumber(summary.gudang.rakPenuh) },
-      { kategori: 'Gudang', item: 'Rak kosong', nilai: formatNumber(summary.gudang.rakKosong) },
-      { kategori: 'Supplier', item: 'Total supplier', nilai: formatNumber(summary.supplier.totalSupplier) },
-      { kategori: 'Supplier', item: 'Supplier aktif', nilai: formatNumber(summary.supplier.supplierAktif) },
-      { kategori: 'Purchase Order', item: 'Total PO', nilai: formatNumber(summary.purchaseOrder.totalPo) },
-      { kategori: 'Purchase Order', item: 'Menunggu persetujuan', nilai: formatNumber(summary.purchaseOrder.menungguPersetujuan) },
-      { kategori: 'Purchase Order', item: 'Disetujui', nilai: formatNumber(summary.purchaseOrder.disetujui) },
       { kategori: 'Barang Masuk', item: 'Draft', nilai: formatNumber(summary.barangMasuk.draft) },
       { kategori: 'Barang Masuk', item: 'Selesai', nilai: formatNumber(summary.barangMasuk.selesai) },
       { kategori: 'Barang Keluar', item: 'Draft', nilai: formatNumber(summary.barangKeluar.draft) },
       { kategori: 'Barang Keluar', item: 'Selesai', nilai: formatNumber(summary.barangKeluar.selesai) },
       { kategori: 'Stock Opname', item: 'Draft', nilai: formatNumber(summary.stockOpname.draft) },
       { kategori: 'Stock Opname', item: 'Selesai', nilai: formatNumber(summary.stockOpname.selesai) },
-      { kategori: 'Pengiriman', item: 'Dalam perjalanan', nilai: formatNumber(summary.pengiriman.dalamPerjalanan) },
-      { kategori: 'Pengiriman', item: 'Terkirim', nilai: formatNumber(summary.pengiriman.terkirim) },
     ];
   }
 
@@ -71,11 +61,12 @@ export function RekapDataContent(): React.JSX.Element {
         { header: 'Nilai', accessor: (r: RekapRow) => r.nilai },
       ],
       {
-        title: 'Rekap Data Gudang — Rekap Data Lengkap',
+        title: 'Rekap Data Lengkap',
         subtitle: 'Laporan / Rekap Data',
         description:
-          'Ringkasan operasional gudang lintas modul (Kelola Barang, Gudang, Supplier, Purchase Order, Barang Masuk/Keluar, Stock Opname, Pengiriman) per tanggal cetak.',
+          'Ringkasan operasional gudang lintas modul (Kelola Barang, Gudang, Barang Masuk/Keluar, Stock Opname) per tanggal cetak.',
         generatedBy: user?.fullName,
+        fileName: 'data rekap lengkap',
       },
     );
   }
@@ -125,7 +116,7 @@ export function RekapDataContent(): React.JSX.Element {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-2xl text-sm text-textMuted">
           Ringkasan lengkap seluruh modul operasional gudang, sumber datanya sama persis dengan
-          widget &quot;Rekap Data&quot; di dashboard — halaman ini cuma menampilkannya lebih rinci.
+          widget &quot;Rekap Data&quot; di dashboard halaman ini cuma menampilkannya lebih rinci.
         </p>
         <Button variant="secondary" onClick={handlePrint} disabled={!summary}>
           Cetak Rekap

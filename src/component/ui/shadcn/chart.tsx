@@ -1,13 +1,10 @@
 "use client";
 import * as React from "react"
-// Static import: recharts namespaces are used as JSX component types, which
-// next/dynamic can't return. Consumers should next/dynamic this whole file.
-// oxlint-disable-next-line emergent/prefer-dynamic-import
+
 import * as RechartsPrimitive from "recharts"
 
 import { cn } from "@/lib/utils"
 
-// Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const
 
 export type ChartConfig = {
@@ -82,8 +79,7 @@ const ChartStyle = ({
   return (
     <style
       dangerouslySetInnerHTML={{
-        // THEMES is a module-level const literal — provably non-null at this call site.
-        // oxlint-disable-next-line emergent/safe-object-methods
+
         __html: Object.entries(THEMES)
           .map(([theme, prefix]) => `
 ${prefix} [data-chart=${id}] {
@@ -302,7 +298,6 @@ const ChartLegendContent = React.forwardRef<HTMLDivElement, ChartLegendContentPr
 })
 ChartLegendContent.displayName = "ChartLegend"
 
-// Helper to extract item config from a payload.
 function getPayloadConfigFromPayload(
   config: ChartConfig,
   payload: unknown,

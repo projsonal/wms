@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { StatusScreen } from '@/component/system/StatusScreen';
+import { logger } from '@/lib/logger';
 
 export default function GlobalErrorBoundary({
   error,
@@ -11,7 +12,11 @@ export default function GlobalErrorBoundary({
   reset: () => void;
 }>): React.JSX.Element {
   useEffect(() => {
-    console.error('Runtime error tertangkap error.tsx:', error);
+    logger.error(error.message || 'Runtime error tertangkap error.tsx', {
+      digest: error.digest,
+      stack: error.stack,
+      url: typeof window !== 'undefined' ? window.location.href : undefined,
+    });
   }, [error]);
 
   return (

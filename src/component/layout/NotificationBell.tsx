@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Bell, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,22 +9,14 @@ import { isAssetNotifEnabled, isStockNotifEnabled } from '@/lib/notifications-co
 import { friendlyError } from '@/lib/utils/errors';
 import { formatDate } from '@/lib/utils/format';
 
-const POLL_INTERVAL_MS = 60 * 1000; // 1 menit — cukup responsif tanpa membebani server
+const POLL_INTERVAL_MS = 60 * 1000;
 
-// Jenis notifikasi yang dikendalikan dua toggle di Settings -> Notifikasi.
-// Jenis lain (po/in/out/ship/opname/maintenance) SELALU tampil di lonceng
-// — cuma dua kategori spesifik ini yang memang punya toggle di halaman
-// Settings, jadi cuma dua ini yang disaring.
+const SWIPE_REVEAL_PX = 88;
+const SWIPE_DELETE_THRESHOLD_PX = 64;
+
 const ASSET_NOTIF_TYPES = new Set(['barang_rusak', 'ping']);
 const STOCK_NOTIF_TYPES = new Set(['stok_menipis']);
 
-/**
- * Backend TETAP membuat notifikasi ini untuk semua user (broadcast "all")
- * terlepas dari preferensi siapa pun — lihat catatan panjang di
- * notifications-context.tsx isStockNotifEnabled(). Penyaringan di sini
- * murni soal apa yang DITAMPILKAN di perangkat/browser ini, bukan
- * mencegah notifikasinya dibuat sama sekali.
- */
 function isNotifVisible(type: string): boolean {
   if (ASSET_NOTIF_TYPES.has(type)) return isAssetNotifEnabled();
   if (STOCK_NOTIF_TYPES.has(type)) return isStockNotifEnabled();
@@ -36,10 +28,7 @@ const NOTIF_TYPE_ICON: Record<string, string> = {
   ping: '📡',
   maintenance: '⚙️',
   trash: '🗑️',
-  // Jenis baru — aktivitas transaksi rutin yang sebelumnya cuma tampil di
-  // panel "Aktivitas Terbaru" dashboard (lihat internal/controller/po,
-  // barang_masuk, barang_keluar, pengiriman, stockOpname Create()), kini
-  // ikut masuk lonceng notifikasi supaya satu tempat untuk semua.
+
   po: '📝',
   in: '📥',
   out: '📤',
@@ -47,17 +36,46 @@ const NOTIF_TYPE_ICON: Record<string, string> = {
   opname: '🔍',
 };
 
-/**
- * Ikon lonceng notifikasi — dipasang SEKALI di Header.tsx (global), jadi
- * otomatis tampil di SEMUA halaman untuk SEMUA role (bukan cuma menu
- * Laporan). Badge angka merah = jumlah belum dibaca, dipoll berkala lewat
- * GET /notifications/unread-count (ringan, tanpa ambil seluruh daftar).
- */
 export function NotificationBell(): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [items, setItems] = useState<AppNotification[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const touchStateRef = useRef<{ id: number; startX: number; startY: number; isHorizontal: boolean | null } | null>(null);
+  const [swipeOffsets, setSwipeOffsets] = useState<Record<number, number>>({});
+
+  function handleSwipeTouchStart(itemId: number, event: React.TouchEvent<HTMLDivElement>): void {
+    const touch = event.touches[0];
+    touchStateRef.current = { id: itemId, startX: touch.clientX, startY: touch.clientY, isHorizontal: null };
+  }
+
+  function handleSwipeTouchMove(itemId: number, event: React.TouchEvent<HTMLDivElement>): void {
+    const state = touchStateRef.current;
+    if (state?.id !== itemId) return;
+    const touch = event.touches[0];
+    const deltaX = touch.clientX - state.startX;
+    const deltaY = touch.clientY - state.startY;
+
+    if (state.isHorizontal === null && (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8)) {
+      state.isHorizontal = Math.abs(deltaX) > Math.abs(deltaY);
+    }
+    if (state.isHorizontal === false) return;
+
+    const clamped = Math.min(0, Math.max(deltaX, -SWIPE_REVEAL_PX * 1.3));
+    setSwipeOffsets((prev) => ({ ...prev, [itemId]: clamped }));
+  }
+
+  function handleSwipeTouchEnd(item: AppNotification): void {
+    const offset = swipeOffsets[item.id] ?? 0;
+    touchStateRef.current = null;
+    if (offset <= -SWIPE_DELETE_THRESHOLD_PX) {
+      handleDelete(item);
+      return;
+    }
+
+    setSwipeOffsets((prev) => ({ ...prev, [item.id]: 0 }));
+  }
 
   async function loadUnreadCount(): Promise<void> {
     try {
@@ -69,7 +87,7 @@ export function NotificationBell(): React.JSX.Element {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadUnreadCount async
+
     loadUnreadCount();
     const interval = window.setInterval(loadUnreadCount, POLL_INTERVAL_MS);
     return () => window.clearInterval(interval);
@@ -117,8 +135,7 @@ export function NotificationBell(): React.JSX.Element {
   }
 
   async function handleDelete(item: AppNotification): Promise<void> {
-    // Hapus dulu dari tampilan (optimistic) supaya terasa instan — kalau
-    // request gagal, muat ulang daftar supaya tampilan sinkron lagi.
+
     setItems((prev) => prev?.filter((n) => n.id !== item.id) ?? null);
     if (!item.isRead) setUnreadCount((prev) => Math.max(0, prev - 1));
     try {
@@ -148,11 +165,16 @@ export function NotificationBell(): React.JSX.Element {
 
       {isOpen ? (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <button
+            type="button"
+            aria-label="Tutup notifikasi"
+            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
+            onClick={() => setIsOpen(false)}
+          />
           <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[90vw] rounded-lg border border-borderSoft bg-surface shadow-card">
             <div className="flex items-center justify-between border-b border-borderSoft px-4 py-3">
               <h3 className="text-sm font-bold text-text">Notifikasi</h3>
-              {items && items.some((n) => !n.isRead) ? (
+              {items?.some((n) => !n.isRead) ? (
                 <button type="button" onClick={handleMarkAllRead} className="text-xs font-semibold text-accentDark hover:underline">
                   Tandai semua dibaca
                 </button>
@@ -177,43 +199,56 @@ export function NotificationBell(): React.JSX.Element {
                     </>
                   );
                   return (
-                    <div
-                      key={item.id}
-                      className={`group flex items-stretch border-b border-borderSoft last:border-0 hover:bg-neutralBg ${
-                        item.isRead ? '' : 'bg-accentSoft/40'
-                      }`}
-                    >
-                      {/* Klik isi notifikasi = tandai dibaca lalu arahkan ke
-                          halaman terkait (mis. tabel Purchase Order) —
-                          murni navigasi, tidak melakukan aksi lain. Tombol
-                          hapus SENGAJA jadi elemen terpisah di sampingnya
-                          (bukan ikut di dalam Link/button ini), supaya
-                          tidak jadi elemen interaktif bersarang. */}
-                      {item.linkHref ? (
-                        <Link
-                          href={item.linkHref}
-                          onClick={() => handleItemClick(item)}
-                          className="flex min-w-0 flex-1 flex-col gap-0.5 px-4 py-3"
-                        >
-                          {content}
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleItemClick(item)}
-                          className="flex min-w-0 flex-1 flex-col gap-0.5 px-4 py-3 text-left"
-                        >
-                          {content}
-                        </button>
-                      )}
+                    <div key={item.id} className="relative overflow-hidden border-b border-borderSoft last:border-0">
+
                       <button
                         type="button"
                         onClick={() => handleDelete(item)}
                         aria-label="Hapus notifikasi"
-                        className="shrink-0 self-start rounded p-1.5 text-textMuted opacity-0 transition-opacity hover:bg-borderSoft hover:text-dangerText focus-visible:opacity-100 group-hover:opacity-100"
+                        className="absolute inset-y-0 right-0 flex w-[88px] items-center justify-center gap-1 bg-dangerText text-xs font-semibold text-white"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-3.5 w-3.5" /> Hapus
                       </button>
+                      <div
+                        className={`group relative z-10 flex items-stretch bg-surface transition-transform hover:bg-neutralBg ${
+                          item.isRead ? '' : 'bg-accentSoft'
+                        }`}
+                        style={{
+                          transform: `translateX(${swipeOffsets[item.id] ?? 0}px)`,
+                          transition: touchStateRef.current?.id === item.id ? 'none' : 'transform 200ms ease-out',
+                        }}
+                        onTouchStart={(event) => handleSwipeTouchStart(item.id, event)}
+                        onTouchMove={(event) => handleSwipeTouchMove(item.id, event)}
+                        onTouchEnd={() => handleSwipeTouchEnd(item)}
+                      >
+
+                        {item.linkHref ? (
+                          <Link
+                            href={item.linkHref}
+                            onClick={() => handleItemClick(item)}
+                            className="flex min-w-0 flex-1 flex-col gap-0.5 px-4 py-3"
+                          >
+                            {content}
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleItemClick(item)}
+                            className="flex min-w-0 flex-1 flex-col gap-0.5 px-4 py-3 text-left"
+                          >
+                            {content}
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(item)}
+                          aria-label="Hapus notifikasi"
+                          className="shrink-0 self-start rounded p-1.5 text-textMuted opacity-0 transition-opacity hover:bg-borderSoft hover:text-dangerText focus-visible:opacity-100 group-hover:opacity-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 });

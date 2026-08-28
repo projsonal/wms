@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
-import { Pencil, Trash2, Lock, Unlock } from 'lucide-react';
+import { Pencil, Trash2, Lock, Unlock, MapPin, List } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
+import { Card } from '@/component/ui/Card';
 import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { Modal } from '@/component/ui/Modal';
 import { Input, NumberField } from '@/component/ui/FormControls';
@@ -13,7 +15,9 @@ import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
 import { warehousesApi } from '@/lib/api/modules';
-import { useResourceList } from '@/lib/hooks/useResourceList';
+import { useServerPaginatedList } from '@/lib/hooks/useServerPaginatedList';
+import { useDebouncedSearch } from '@/lib/hooks/useDebouncedSearch';
+import { TableSearchInput } from '@/component/ui/TableSearchInput';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { formatNumber } from '@/lib/utils/format';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
@@ -22,6 +26,11 @@ import { GENERIC_STATUS_META } from '@/lib/utils/status';
 import type { Warehouse } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
+const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
+const Tooltip = dynamic(() => import('react-leaflet').then((m) => m.Tooltip), { ssr: false });
+
 const EMPTY_FORM: Partial<Warehouse> = { name: '', code: '', address: '', picName: '', phone: '', capacity: 0 };
 
 const CONFIRM_DELETE_MESSAGE = 'Apakah yakin ingin menghapus data ini?';
@@ -29,6 +38,45 @@ const CONFIRM_PROTECT_LOCK_MESSAGE =
   'Apakah Anda yakin untuk melindungi/mengunci data ini supaya tidak bisa dieksekusi (diubah atau dihapus) oleh role karyawan?';
 const CONFIRM_PROTECT_UNLOCK_MESSAGE = 'Apakah Anda yakin ingin membuka kunci data ini?';
 
+type WarehouseMapViewProps = {
+  warehouses: Warehouse[];
+  center: [number, number];
+  icon: any;
+};
+
+function WarehouseMapView({ warehouses, center, icon }: Readonly<WarehouseMapViewProps>): React.JSX.Element {
+  if (warehouses.length === 0) {
+    return (
+      <p className="p-6 text-center text-xs text-textMuted">
+        Belum ada gudang dengan koordinat terisi. Isi Latitude/Longitude lewat Ubah Gudang
+        (bisa dicari otomatis dari alamat) supaya muncul di sini.
+      </p>
+    );
+  }
+
+  return (
+    <MapContainer center={center} zoom={11} style={{ height: '420px', width: '100%' }}>
+      <TileLayer
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      />
+      {warehouses.map((warehouse) => (
+        <Marker
+          key={warehouse.id}
+          position={[warehouse.latitude as number, warehouse.longitude as number]}
+          icon={icon ?? undefined}
+        >
+          <Tooltip direction="top" offset={[0, -10]}>
+            <span className="font-semibold">{warehouse.name}</span>
+            {warehouse.code && warehouse.code !== '-' ? ` (${warehouse.code})` : ''}
+            <br />
+            {warehouse.address}
+          </Tooltip>
+        </Marker>
+      ))}
+    </MapContainer>
+  );
+}
 
 export function WarehouseListContent(): React.JSX.Element {
   const { user } = useAuth();
@@ -37,12 +85,79 @@ export function WarehouseListContent(): React.JSX.Element {
   const confirm = useConfirm();
   const { requestExport, dialog: exportDialog } = useExportFormat();
 
-  const { rows, isLoading, error, mutate } = useResourceList('warehouses', warehousesApi);
+  const { input: searchInput, setInput: setSearchInput, term: searchTerm } = useDebouncedSearch();
+  const { rows, isLoading, error, mutate, serverPagination } = useServerPaginatedList(
+    'warehouses',
+    warehousesApi,
+    { search: searchTerm || undefined },
+
+    { initialLimit: 200 },
+  );
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Warehouse>>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
+  const [viewMode, setViewMode] = useState<'data' | 'peta'>('data');
+
+  const [warehouseIcon, setWarehouseIcon] = useState<any>(null);
+
+  useEffect(() => {
+    import('leaflet').then((L) => {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9999px;background:#b45309;color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 21V10l9-6 9 6v11" /><path d="M3 10h18" /><rect x="7" y="14" width="4" height="7" /><rect x="13" y="14" width="4" height="4" />
+          </svg>
+        </div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
+        popupAnchor: [0, -17],
+      });
+
+      setWarehouseIcon(icon);
+    });
+  }, []);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+
+  async function handleGeocodeAddress(): Promise<void> {
+    const original = form.address?.trim();
+    if (!original) return;
+    setIsGeocoding(true);
+    try {
+      const parts = original.split(',').map((p) => p.trim()).filter(Boolean);
+
+      for (let dropCount = 0; dropCount < parts.length; dropCount++) {
+        const attempt = parts.slice(dropCount).join(', ');
+        if (!attempt) break;
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&q=${encodeURIComponent(attempt)}`,
+        );
+        if (!res.ok) continue;
+        const results: Array<{ lat: string; lon: string; display_name: string }> = await res.json();
+        if (results.length > 0) {
+          const { lat, lon, display_name } = results[0];
+          setForm((prev) => ({ ...prev, latitude: Number(lat), longitude: Number(lon) }));
+          toast.success(
+            dropCount === 0
+              ? `Koordinat ditemukan: ${display_name}`
+              : `Alamat persis tidak ketemu, dipakai titik area terdekat: ${display_name} geser pin di peta kalau kurang presisi.`,
+          );
+          return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      toast.error(
+        'Alamat ini (di semua tingkat, sampai kabupaten/provinsi) tidak ditemukan di OpenStreetMap coba tulis dengan istilah lain, atau isi koordinat manual (salin dari Google Maps: klik kanan titik lokasi → salin koordinat).',
+      );
+    } catch {
+      toast.error('Gagal mencari koordinat, coba cek koneksi internet atau isi koordinat manual.');
+    } finally {
+      setIsGeocoding(false);
+    }
+  }
 
   const [isBulkMode, setIsBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -59,7 +174,7 @@ export function WarehouseListContent(): React.JSX.Element {
 
   function openEditModal(row: Warehouse): void {
     if (row.isProtected) {
-      toast.error('Data ini dikunci (Protect) oleh super admin — tidak bisa diubah.');
+      toast.error('Data ini dikunci (Protect) oleh super admin tidak bisa diubah.');
       return;
     }
     setEditingId(row.id);
@@ -77,10 +192,7 @@ export function WarehouseListContent(): React.JSX.Element {
   }
 
   async function handleSave(): Promise<void> {
-    // Backend mewajibkan "kode" (GudangRequest.Kode validate:"required") —
-    // tanpa ini, Create/Update selalu ditolak validasi (dulu field ini
-    // tidak ada di form sama sekali, sehingga Tambah/Ubah Gudang SELALU
-    // gagal dengan pesan generik "validasi gagal").
+
     if (!form.name?.trim()) {
       toast.error('Nama gudang wajib diisi.');
       return;
@@ -109,7 +221,7 @@ export function WarehouseListContent(): React.JSX.Element {
 
   async function handleDeleteOne(row: Warehouse): Promise<void> {
     if (row.isProtected) {
-      toast.error('Data ini dikunci (Protect) oleh super admin — tidak bisa dihapus.');
+      toast.error('Data ini dikunci (Protect) oleh super admin tidak bisa dihapus.');
       return;
     }
     const ok = await confirm({
@@ -165,8 +277,8 @@ export function WarehouseListContent(): React.JSX.Element {
     { header: 'Status', accessor: (r: Warehouse) => r.status },
   ];
   const WAREHOUSE_PDF_META = {
-    title: 'Rekap Data Gudang — Daftar Gudang',
-    subtitle: 'Menu Utama / WMS',
+    title: 'Rekap Data Daftar Gudang',
+    subtitle: 'Manajemen / Manajemen Gudang',
     description: 'Persebaran gudang operasional beserta penanggung jawab (PIC), kapasitas total, dan kapasitas terpakai per lokasi.',
   };
 
@@ -180,7 +292,7 @@ export function WarehouseListContent(): React.JSX.Element {
 
   async function handleBulkChange(selectedRows: Warehouse[]): Promise<void> {
     if (!isBulkMode) {
-      toast('Aktifkan "Modify" dulu untuk memilih satu baris data yang mau diubah.');
+      toast('Aktifkan "Modify" terlebih dahulu untuk memilih data per baris yang mau diubah.');
       return;
     }
     if (selectedRows.length !== 1) {
@@ -192,7 +304,7 @@ export function WarehouseListContent(): React.JSX.Element {
 
   async function handleBulkDelete(selectedRows: Warehouse[]): Promise<void> {
     if (!isBulkMode || selectedRows.length === 0) {
-      toast('Aktifkan "Modify" dulu, lalu pilih satu atau beberapa baris yang mau dihapus.');
+      toast('Aktifkan "Modify" terlebih dahulu, kemudian pilih satu atau beberapa data per baris yang mau dihapus.');
       return;
     }
     const ok = await confirm({
@@ -237,32 +349,28 @@ export function WarehouseListContent(): React.JSX.Element {
 
   async function handleRowAction(action: TableRowAction): Promise<void> {
     const selectedRows = rows.filter((r) => selectedIds.has(r.id));
-
-    switch (action) {
-      case 'add':
-        openCreateModal();
-        return;
-      case 'export':
-        handleExport();
-        return;
-      case 'print':
-        handlePrint();
-        return;
-      case 'modify':
+    const actionHandlers: Partial<Record<TableRowAction, () => Promise<void> | void>> = {
+      add: () => openCreateModal(),
+      export: () => handleExport(),
+      print: () => handlePrint(),
+      modify: () => {
         setIsBulkMode((prev) => !prev);
         setSelectedIds(new Set());
-        return;
-      case 'change':
+      },
+      change: async () => {
         await handleBulkChange(selectedRows);
-        return;
-      case 'delete':
+      },
+      delete: async () => {
         await handleBulkDelete(selectedRows);
-        return;
-      case 'protect':
+      },
+      protect: async () => {
         await handleBulkProtect(selectedRows);
-        return;
-      default:
-        return;
+      },
+    };
+
+    const handler = actionHandlers[action];
+    if (handler) {
+      await handler();
     }
   }
 
@@ -349,11 +457,20 @@ export function WarehouseListContent(): React.JSX.Element {
     },
   ];
 
+  const warehousesWithCoords = rows.filter((w) => w.latitude != null && w.longitude != null);
+  const mapCenter: [number, number] =
+    warehousesWithCoords.length > 0
+      ? [
+          warehousesWithCoords.reduce((sum, w) => sum + (w.latitude as number), 0) / warehousesWithCoords.length,
+          warehousesWithCoords.reduce((sum, w) => sum + (w.longitude as number), 0) / warehousesWithCoords.length,
+        ]
+      : [-6.9175, 107.6191];
+
   return (
-    <PageShell title="Warehouse Management System (WMS)" breadcrumb="Menu Utama / WMS">
+    <PageShell title="Manajemen Gudang" breadcrumb="Manajemen / Manajemen Gudang">
       <StatsRow
         stats={[
-          { id: 'jumlah-gudang', label: 'Jumlah Gudang', value: rows.length },
+          { id: 'jumlah-gudang', label: 'Jumlah Gudang', value: serverPagination.total ?? rows.length },
           {
             id: 'kapasitas',
             label: 'Kapasitas Terpakai',
@@ -367,23 +484,51 @@ export function WarehouseListContent(): React.JSX.Element {
           { id: 'total-barang', label: 'Total Barang', value: formatNumber(totalItems) },
         ]}
       />
-      {/* Tombol "+Tambah" di header sengaja dihilangkan — pakai action bar
-          geser (TableRowActionBar, tombol "Add") di dalam tabel. */}
-      <DataTable
-        title="Daftar Gudang"
-        description={
-          isBulkMode
-            ? `Mode Modify aktif — ${selectedIds.size} baris terpilih. Pilih baris lalu pakai Change/Delete/Protect di atas.`
-            : 'Persebaran gudang beserta kapasitas & PIC'
-        }
-        columns={columns}
-        rows={rows}
-        getRowId={(row) => row.id}
-        isLoading={isLoading}
-        errorMessage={listErrorMessage(error)}
-        onRowAction={handleRowAction}
-        module="manajemen_gudang"
-      />
+
+      <div className="flex items-center gap-1 rounded-full bg-neutralBg p-1 text-xs w-fit">
+        <button
+          type="button"
+          onClick={() => setViewMode('data')}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 font-semibold transition-colors ${
+            viewMode === 'data' ? 'bg-accent text-white' : 'text-textMuted hover:text-text'
+          }`}
+        >
+          <List className="h-3.5 w-3.5" /> Kelola Data Gudang
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('peta')}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 font-semibold transition-colors ${
+            viewMode === 'peta' ? 'bg-accent text-white' : 'text-textMuted hover:text-text'
+          }`}
+        >
+          <MapPin className="h-3.5 w-3.5" /> Peta
+        </button>
+      </div>
+
+      {viewMode === 'peta' ? (
+        <Card className="flex flex-col gap-2 overflow-hidden p-0">
+          <WarehouseMapView warehouses={warehousesWithCoords} center={mapCenter} icon={warehouseIcon} />
+        </Card>
+      ) : (
+        <DataTable
+          title="Daftar Gudang"
+          description={
+            isBulkMode
+              ? `Mode Modify aktif — ${selectedIds.size} baris terpilih. Pilih baris lalu pakai Change/Delete/Protect di atas.`
+              : 'Persebaran gudang beserta kapasitas & PIC — Kapasitas Terpakai/Total Barang dihitung dari unit ber-Nomor-Seri saja'
+          }
+          columns={columns}
+          rows={rows}
+          getRowId={(row) => row.id}
+          isLoading={isLoading}
+          errorMessage={listErrorMessage(error)}
+          onRowAction={handleRowAction}
+          module="manajemen_gudang"
+          serverPagination={serverPagination}
+          toolbar={<TableSearchInput value={searchInput} onChange={setSearchInput} placeholder="Cari nama gudang......" />}
+        />
+      )}
 
       <Modal
         isOpen={isModalOpen}
@@ -420,6 +565,19 @@ export function WarehouseListContent(): React.JSX.Element {
           value={form.address ?? ''}
           onChange={(event) => setForm({ ...form, address: event.target.value })}
         />
+        <div className="-mt-2 flex items-center justify-between">
+          <p className="text-xs text-textMuted">
+            Koordinat bisa disalin manual dari Google Maps, atau cari otomatis dari alamat di atas.
+          </p>
+          <button
+            type="button"
+            onClick={handleGeocodeAddress}
+            disabled={isGeocoding || !form.address?.trim()}
+            className="flex shrink-0 items-center gap-1 rounded-md border border-borderSoft px-2 py-1 text-xs font-semibold text-accentDark hover:border-accent disabled:opacity-50"
+          >
+            <MapPin className="h-3.5 w-3.5" /> {isGeocoding ? 'Mencari...' : 'Cari Koordinat dari Alamat'}
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-4">
           <Input
             label="Latitude (opsional)"
@@ -444,10 +602,6 @@ export function WarehouseListContent(): React.JSX.Element {
             }}
           />
         </div>
-        <p className="-mt-2 text-xs text-textMuted">
-          Isi Latitude/Longitude supaya gudang ini muncul sebagai titik di peta Pickup & Dropoff. Bisa
-          disalin dari Google Maps (klik kanan lokasi → salin koordinat).
-        </p>
         <div className="grid grid-cols-2 gap-4">
           <Input
             label="PIC (Penanggung Jawab)"

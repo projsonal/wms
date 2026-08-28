@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import { Card } from '@/component/ui/Card';
 import { Select } from '@/component/ui/FormControls';
 import { Button } from '@/component/ui/Button';
-import { rolesApi, type PermissionMatrixItem } from '@/lib/api/modules';
+import { rolesApi, usersApi, type PermissionMatrixItem } from '@/lib/api/modules';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { HttpError } from '@/lib/api/client';
 import { PERMISSION_MODULES, PERMISSION_TABS, type PermissionTabKey } from '@/lib/data/permission-modules';
@@ -35,19 +35,15 @@ function emptyItem(module: string): PermissionMatrixItem {
   };
 }
 
-/**
- * Pill toggle ON/OFF bergaya mockup (bukan Switch shadcn biasa — mockup
- * menampilkan label "OFF" langsung di dalam pill, bukan cuma dot geser).
- */
 function PermissionPill({
   checked,
   onChange,
   disabled,
-}: {
+}: Readonly<{
   checked: boolean;
   onChange: () => void;
   disabled?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <button
       type="button"
@@ -67,11 +63,6 @@ function PermissionPill({
   );
 }
 
-/**
- * Kartu "Perizinan Hak Akses User" — matrix modul x aksi per role, dengan
- * tab (Umum/Approval/Laporan/Sistem) supaya tidak semua modul ditampilkan
- * sekaligus. Real, tersambung ke GET/PUT /roles/:id/permissions.
- */
 export function PermissionMatrixCard(): React.JSX.Element {
   const confirm = useConfirm();
   const [roles, setRoles] = useState<Array<{ id: number; name: string }>>([]);
@@ -81,6 +72,18 @@ export function PermissionMatrixCard(): React.JSX.Element {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+
+  const [lookupMode, setLookupMode] = useState<'role' | 'username'>('role');
+  const [allUsers, setAllUsers] = useState<Array<{ id: string; username: string; role: string }>>([]);
+  const [selectedUsername, setSelectedUsername] = useState('');
+
+  useEffect(() => {
+    usersApi
+      .list({ pageSize: 200 })
+      .then((res) => setAllUsers(res.data.map((u) => ({ id: u.id, username: u.username, role: u.role }))))
+      .catch(() => setAllUsers([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sekali saat mount
+  }, []);
 
   useEffect(() => {
     rolesApi
@@ -97,11 +100,23 @@ export function PermissionMatrixCard(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
+    if (lookupMode !== 'username' || !selectedUsername || roles.length === 0) {
+      return;
+    }
+    const targetUser = allUsers.find((u) => u.username === selectedUsername);
+    if (!targetUser) return;
+    const matchedRole = roles.find((r) => r.name === targetUser.role);
+    if (matchedRole) {
+      setRoleId(matchedRole.id);
+    }
+  }, [lookupMode, selectedUsername, allUsers, roles]);
+
+  useEffect(() => {
     if (roleId === null) {
       return;
     }
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset loading state saat roleId berganti, sebelum fetch async di bawah
+
     setIsLoading(true);
     rolesApi
       .getPermissionMatrix(roleId)
@@ -129,14 +144,11 @@ export function PermissionMatrixCard(): React.JSX.Element {
     const current = items[moduleKey] ?? emptyItem(moduleKey);
     const willEnable = !current[action];
 
-    // Konfirmasi HANYA saat MENGAKTIFKAN izin (privilege escalation) — saat
-    // mematikan izin (memperketat akses) tidak perlu konfirmasi tambahan,
-    // sesuai pola keamanan umum (grant butuh persetujuan, revoke tidak).
     if (willEnable) {
       const roleName = roles.find((r) => r.id === roleId)?.name ?? 'role ini';
       const actionLabel = ACTION_COLUMNS.find((c) => c.key === action)?.label ?? action;
       const ok = await confirm({
-        title: 'Izinkan Akses Ini?',
+        title: 'Apakah kamu yakin memberikan Izin terhadap Akses Ini?',
         message: `Apakah kamu yakin mengizinkan users dengan role "${roleName}" fitur "${actionLabel}" pada modul "${moduleLabel}"?`,
         confirmLabel: 'Ya, Izinkan',
         variant: 'protect',
@@ -157,9 +169,10 @@ export function PermissionMatrixCard(): React.JSX.Element {
     try {
       await rolesApi.updatePermissionMatrix(roleId, Object.values(items));
       setIsDirty(false);
-      toast.success('Matrix akses berhasil disimpan.');
+      const roleName = roles.find((role) => role.id === roleId)?.name ?? 'role ini';
+      toast.success(`Berhasil memberi akses kepada "${roleName}" disimpan.`);
     } catch (err) {
-      toast.error(err instanceof HttpError ? err.message : 'Gagal menyimpan matrix akses.');
+      toast.error(err instanceof HttpError ? err.message : 'Gagal menyimpan pemberi akses.');
     } finally {
       setIsSaving(false);
     }
@@ -173,23 +186,65 @@ export function PermissionMatrixCard(): React.JSX.Element {
         <div>
           <h2 className="text-base font-semibold text-text">Perizinan Hak Akses User</h2>
           <p className="text-xs text-textMuted">
-            Atur hak akses tiap modul untuk role di bawah Super Admin — Super Admin sendiri
-            SELALU mencakup semua fitur secara otomatis, jadi tidak perlu (dan tidak bisa)
-            diatur di sini.
+            Atur hak akses tiap modul berdasarkan role ataupun username.
+            kamu bisa mengatur di sini.
           </p>
         </div>
-        <Select
-          value={roleId !== null ? String(roleId) : ''}
-          onChange={(event) => setRoleId(Number(event.target.value))}
-          options={roles
-            .filter((r) => r.name !== 'super_admin')
-            .map((r) => ({ label: r.name, value: String(r.id) }))}
-          className="w-40"
-        />
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-1 rounded-full bg-neutralBg p-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setLookupMode('role')}
+              className={clsx(
+                'rounded-full px-3 py-1 font-semibold transition-colors',
+                lookupMode === 'role' ? 'bg-accent text-white' : 'text-textMuted hover:text-text',
+              )}
+            >
+              Per Role
+            </button>
+            <button
+              type="button"
+              onClick={() => setLookupMode('username')}
+              className={clsx(
+                'rounded-full px-3 py-1 font-semibold transition-colors',
+                lookupMode === 'username' ? 'bg-accent text-white' : 'text-textMuted hover:text-text',
+              )}
+            >
+              Cari Username
+            </button>
+          </div>
+          {lookupMode === 'role' ? (
+            <Select
+              value={roleId !== null ? String(roleId) : ''}
+              onChange={(event) => setRoleId(Number(event.target.value))}
+              options={roles
+                .filter((r) => r.name !== 'super_admin')
+                .map((r) => ({ label: r.name, value: String(r.id) }))}
+              className="w-40"
+            />
+          ) : (
+            <Select
+              value={selectedUsername}
+              onChange={(event) => setSelectedUsername(event.target.value)}
+              placeholder="Pilih username"
+              options={allUsers
+                .filter((u) => u.role !== 'super_admin')
+                .map((u) => ({ label: u.username, value: u.username }))}
+              className="w-48"
+            />
+          )}
+        </div>
       </div>
 
-      {/* Tab — instead of menampilkan semua modul sekaligus, dikelompokkan
-          4 kategori supaya tabelnya tetap ringkas. */}
+      {lookupMode === 'username' && selectedUsername ? (
+        <p className="rounded-md bg-infoBg px-3 py-2 text-xs text-infoText">
+          Menampilkan izin role <strong>{roles.find((r) => r.id === roleId)?.name ?? '...'}</strong> (role
+          milik <strong>{selectedUsername}</strong>) Mengatur di sistem masih PER ROLE, jadi mengubah
+          toggle di bawah akan berlaku untuk SEMUA user dengan role/username yang sama, bukan cuma{' '}
+          {selectedUsername} sendirian.
+        </p>
+      ) : null}
+
       <div className="flex gap-1 rounded-full bg-neutralBg p-1 self-start">
         {PERMISSION_TABS.map((t) => (
           <button

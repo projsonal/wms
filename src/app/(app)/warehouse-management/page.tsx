@@ -1,7 +1,5 @@
-import { WarehouseManagementContent } from '@/component/gudang/WarehouseManagement';
-import { RoleGuard } from '@/component/layout/RoleGuard';
-import { STAFF_ROLES } from '@/auth/roles';
+import { WarehouseListContent } from '@/component/gudang/WarehouseList';
 
 export default function Page(): React.JSX.Element {
-  return <RoleGuard allowedRoles={STAFF_ROLES}><WarehouseManagementContent /></RoleGuard>;
+  return <WarehouseListContent />;
 }

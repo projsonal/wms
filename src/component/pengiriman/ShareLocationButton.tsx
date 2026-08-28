@@ -12,27 +12,13 @@ interface ShareLocationButtonProps {
   deliveryId: string;
 }
 
-/**
- * Tombol untuk KURIR membagikan lokasi GPS-nya secara real-time — pakai
- * `navigator.geolocation.watchPosition` (API browser bawaan, bukan
- * hardware/app pihak ketiga) untuk memantau posisi perangkat, lalu kirim
- * update ke server setiap ~8 detik selama toggle ini aktif. Admin/dispatcher
- * yang membuka halaman yang sama akan melihat marker-nya bergerak lewat
- * LiveTrackingMap (polling GET .../lokasi).
- */
 export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): React.JSX.Element {
   const [isSharing, setIsSharing] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const lastSentAtRef = useRef(0);
-  // Penanda "browser SUDAH benar-benar mengonfirmasi izin lokasi & kasih
-  // posisi valid" — beda dari sekadar "watchPosition() sudah dipanggil".
-  // watchPosition() ASYNC: memanggilnya TIDAK berarti izin otomatis
-  // diberikan. Dipakai supaya toast sukses & setIsSharing(true) baru
-  // terjadi SEKALI, tepat saat posisi pertama benar-benar diterima —
-  // bukan langsung setelah watchPosition() dipanggil (lihat bug lama di
-  // bawah).
+
   const hasConfirmedRef = useRef(false);
 
   useEffect(() => {
@@ -61,27 +47,9 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
     setIsRequesting(true);
     hasConfirmedRef.current = false;
 
-    // Penggunaan Geolocation API di sini SENGAJA dan perlu (bukan
-    // dipasang diam-diam): tombol ini eksplisit diberi label "Bagikan
-    // Lokasi", hanya dirender untuk role karyawan/kurir (lihat
-    // DeliveryDetail.tsx), dan browser SENDIRI akan menampilkan dialog
-    // izin native ke user sebelum data lokasi apa pun terkirim -- ini
-    // inti dari fitur live tracking pengiriman, bukan sekadar tracking
-    // analitik. Ditandai eslint-disable karena SonarQube menandai
-    // SEMUA pemanggilan geolocation untuk ditinjau manual (bukan
-    // berarti otomatis salah), dan penggunaan ini sudah ditinjau.
-    // eslint-disable-next-line sonarjs/no-intrusive-permissions
     const id = navigator.geolocation.watchPosition(
       (pos) => {
-        // BUG SEBELUMNYA: toast "berhasil dibagikan" & setIsSharing(true)
-        // dipanggil LANGSUNG setelah watchPosition() diminta, padahal izin
-        // browser belum tentu disetujui saat itu (async) — kalau ternyata
-        // ditolak, toast "berhasil" sempat tampil sepersekian detik lalu
-        // langsung dibarengi pesan "Izin lokasi ditolak" di bawahnya,
-        // membingungkan (persis yang terlihat di screenshot). Sekarang
-        // toast & status "aktif" HANYA muncul di sini, di callback SUKSES
-        // watchPosition — artinya browser benar-benar sudah kasih posisi
-        // valid, bukan tebakan optimis.
+
         if (!hasConfirmedRef.current) {
           hasConfirmedRef.current = true;
           setIsRequesting(false);
@@ -89,9 +57,7 @@ export function ShareLocationButton({ deliveryId }: ShareLocationButtonProps): R
           toast.success('Lokasi kamu sekarang dibagikan secara real-time.');
         }
         const now = Date.now();
-        // Throttle pengiriman ke server (browser bisa memicu callback ini
-        // jauh lebih sering dari SEND_INTERVAL_MS) — cukup kirim satu kali
-        // per interval, bukan setiap kali GPS device update posisinya.
+
         if (now - lastSentAtRef.current < SEND_INTERVAL_MS) {
           return;
         }

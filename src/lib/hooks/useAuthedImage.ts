@@ -8,7 +8,6 @@ export function useAuthedImage(path?: string | null): string | undefined {
     let cancelled = false;
     let objectUrl: string | undefined;
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sengaja reset avatar lama saat path berubah (mis. ganti user/upload foto baru), sebelum blob baru selesai di-fetch
     setBlobUrl(undefined);
     if (!path) {
       return undefined;
@@ -24,9 +23,7 @@ export function useAuthedImage(path?: string | null): string | undefined {
         setBlobUrl(objectUrl);
       })
       .catch(() => {
-        // Gagal muat (mis. token habis & refresh juga gagal) -> biarkan
-        // undefined, komponen pemanggil jatuh ke avatar inisial daripada
-        // menampilkan ikon gambar rusak.
+
         if (!cancelled) setBlobUrl(undefined);
       });
 

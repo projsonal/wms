@@ -12,19 +12,7 @@ interface HeaderProps {
   action?: ReactNode;
 }
 
-/**
- * Header judul halaman + breadcrumb, ditampilkan di atas konten setiap
- * halaman dashboard. Bagian dari kerangka layout (bersama Sidebar & Footer),
- * karena itu ditempatkan di `component/layout`, bukan `component/ui`.
- *
- * NotificationBell & TrashBin SENGAJA dipasang di sini (bukan lewat prop
- * `action` per halaman) supaya otomatis tampil di SEMUA halaman untuk
- * SEMUA role — sebelumnya "Unduh Laporan" (action khusus halaman Laporan)
- * jadi satu-satunya tempat notifikasi terlihat; sekarang keduanya lepas
- * dari `action` dan selalu ada di ujung kanan header, di depan action
- * spesifik halaman kalau ada.
- */
-export function Header({ title, breadcrumb, action }: HeaderProps): React.JSX.Element {
+export function Header({ title, breadcrumb, action }: Readonly<HeaderProps>): React.JSX.Element {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-borderSoft bg-surface px-4 py-4 sm:px-6 lg:px-8 lg:py-5 print:hidden">
       <div className="flex items-center gap-3">

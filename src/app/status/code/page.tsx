@@ -7,16 +7,6 @@ function isStatusCode(value: string): value is StatusCode {
   return (VALID_CODES as string[]).includes(value);
 }
 
-/**
- * Halaman generik `/status/:code` — satu tempat untuk semua kode status
- * yang mungkin perlu ditampilkan ke pengguna (401/403 dari proteksi
- * akses, 408/500/502/503/504 dari kegagalan memanggil backend, dst),
- * supaya desainnya konsisten di seluruh aplikasi. Dipakai oleh:
- *   - RoleGuard.tsx -> redirect ke /status/403 saat role tidak diizinkan
- *   - lib/api/client.ts -> redirect ke /status/50x saat backend gagal total
- *   - bisa juga dibuka manual untuk kebutuhan lain di masa depan
- * Kode yang tidak dikenali -> 404 asli (lihat not-found.tsx).
- */
 export default async function StatusCodePage({
   params,
 }: {

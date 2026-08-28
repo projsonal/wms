@@ -13,12 +13,6 @@ interface MapPlaceholderProps {
   heightClassName?: string;
 }
 
-/**
- * Placeholder peta ringan berbasis CSS grid — dipakai untuk pratinjau lokasi
- * tanpa bergantung pada API key penyedia peta pihak ketiga. Pada integrasi
- * produksi, ganti dengan komponen peta (mis. Google Maps / Mapbox) yang
- * menerima koordinat dari field `latitude`/`longitude` pada tipe `Delivery`.
- */
 export function MapPlaceholder({
   title,
   pins = [],

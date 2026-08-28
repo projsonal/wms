@@ -101,7 +101,7 @@ export function CaptchaGate({ children }: Readonly<CaptchaGateProps>): React.JSX
         setAnswer('');
       }
     } catch {
-      setError('Jawaban captcha salah atau kedaluwarsa, coba lagi.');
+      setError('Jawaban captcha salah atau kedaluwarsa, silakan coba lagi. klik button refresh captcha di ataas sebelah kanan');
       setAnswer('');
     } finally {
       setIsSubmitting(false);

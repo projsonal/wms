@@ -37,62 +37,27 @@ const ACTIONS: ActionDef[] = [
   { key: 'protect', label: 'Protect', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
 ];
 
-/** Aksi yang TIDAK PERNAH digerbang matrix perizinan — backend menegakkan
- * keduanya lewat RequireRole (super_admin/admin saja), bukan lewat
- * RequirePermission per-module, jadi karyawan tidak akan pernah bisa
- * mendapat aksi ini walau di-toggle ON di matrix (backend tetap menolak). */
 const ROLE_ONLY_ACTIONS = new Set<TableRowAction>(['delete', 'protect']);
 
 interface TableRowActionBarProps {
-  /** Dipanggil saat salah satu tombol aksi ditekan. Kalau tidak diisi,
-   * tombol tetap tampil (mengikuti mockup) tapi tidak melakukan apa-apa —
-   * pemanggil per halaman yang menentukan aksi sesungguhnya (mis. buka
-   * modal tambah, konfirmasi hapus, dst). */
+
   onAction?: (action: TableRowAction) => void;
-  /** Nonaktifkan tombol tertentu (mis. "delete" saat tidak ada baris terpilih). */
+
   disabledActions?: TableRowAction[];
-  /** Batasi tombol yang MUNCUL sama sekali (bukan sekadar di-nonaktifkan) —
-   * dipakai mis. di widget dashboard yang menggabungkan beberapa jenis
-   * resource sekaligus, sehingga aksi Add/Change/Delete/Modify/Protect
-   * yang terikat ke satu jenis resource tidak masuk akal ditampilkan.
-   * Default: semua 7 aksi baku tampil (mengikuti mockup). */
+
   visibleActions?: TableRowAction[];
-  /** Slug modul backend (mis. "kelola_barang") — kalau diisi, tombol
-   * Add/Change/Modify/Print HANYA tampil sesuai matrix perizinan role user
-   * yang login (dibaca lewat usePermissions), bukan cuma dari role
-   * super_admin/admin. Delete & Protect tetap SELALU role-only (lihat
-   * ROLE_ONLY_ACTIONS) karena backend memang begitu. Kalau TIDAK diisi,
-   * perilaku lama dipertahankan penuh (toolbar hanya tampil untuk
-   * super_admin/admin) supaya halaman lain yang belum di-migrasi tidak
-   * berubah perilakunya. */
+
   module?: string;
   className?: string;
 }
 
-/**
- * Toolbar aksi tabel yang bisa digeser (scroll) ke kiri/kanan lewat tombol
- * chevron beranimasi, berisi aksi baku: Add, Change, Delete, Export, Print,
- * Modify, Protect — masing-masing beda fungsi.
- *
- * Tampil untuk super_admin/admin selalu (kompatibel dengan perilaku lama).
- * Untuk role lain (termasuk karyawan), toolbar HANYA tampil kalau prop
- * `module` diisi DAN role user yang login punya minimal satu izin yang
- * relevan di matrix (Settings > Perizinan Hak Akses User) — tombol yang
- * benar-benar tampil pun mengikuti izin per-aksi, bukan semua-atau-tidak.
- *
- * Di perangkat mobile (dideteksi lewat User-Agent, bukan lebar viewport),
- * toolbar berganti wujud jadi floating action button bulat mengambang di
- * pojok layar yang saat disentuh memekar jadi cincin tombol bulat kecil —
- * sesuai mockup Figma yang diberikan (lingkaran "+" -> lingkaran "×" +
- * cincin aksi).
- */
 export function TableRowActionBar({
   onAction,
   disabledActions = [],
   visibleActions,
   module,
   className,
-}: TableRowActionBarProps): React.JSX.Element | null {
+}: Readonly<TableRowActionBarProps>): React.JSX.Element | null {
   const { user } = useAuth();
   const isMobileDevice = useIsMobileDevice();
   const { can } = usePermissions();
@@ -110,8 +75,7 @@ export function TableRowActionBar({
       return false;
     }
     if (action === 'export') {
-      // Export cuma mengunduh apa yang sudah terlihat di layar (read-only)
-      // — tidak butuh izin tambahan selama halamannya sendiri bisa diakses.
+
       return true;
     }
     if (action === 'add') return can(module, 'tambah');
@@ -140,14 +104,13 @@ export function TableRowActionBar({
 
   function scrollBy(delta: number): void {
     scrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
-    // Update tombol chevron sedikit setelah animasi smooth-scroll berjalan.
+
     window.setTimeout(updateEdgeState, 300);
   }
 
   return (
     <div className={className ?? 'flex flex-col gap-2'}>
-      {/* Baris chevron navigasi, dipisah di atas strip tombol — meniru
-          posisi persis pada mockup (chevron sendiri, lalu strip tombol). */}
+
       <div className="flex items-center gap-1 rounded-full border border-borderSoft bg-surfaceAlt p-1 self-start">
         <motion.button
           type="button"
@@ -209,30 +172,14 @@ interface MobileFabProps {
   actions: ActionDef[];
 }
 
-const RADIAL_RADIUS = 84;
-
-/**
- * Floating action button bulat khusus mobile: lingkaran utama "+" yang
- * saat disentuh memekar jadi cincin tombol bulat kecil tersebar di
- * SEKELILING tombol utama (busur ~350°, dari sedikit di atas kanan,
- * melingkar lewat atas, kiri, sampai ke bawah — cuma celah kecil di sisi
- * kanan langsung yang dilewati, karena FAB ada di pojok kanan layar dan
- * arah itu akan keluar layar). Sebelumnya cuma busur 160° di atas saja
- * ("membuka ke atas"), jadi 7 aksi (Add/Change/Delete/Export/Print/
- * Modify/Protect — setara lengkap dengan action bar di laptop) terlalu
- * berdesakan; sekarang tersebar sampai ke bawah supaya semua tombol
- * jelas terpisah & gampang disentuh, meniru kelengkapan tombol yang ada
- * di tampilan laptop. Lingkaran utama berubah jadi "×" untuk menutup.
- */
-function MobileFabActionMenu({ onAction, disabledActions, actions }: MobileFabProps): React.JSX.Element {
+function MobileFabActionMenu({ onAction, disabledActions, actions }: Readonly<MobileFabProps>): React.JSX.Element {
   const [open, setOpen] = useState(false);
-  // Beritahu FAB navigasi global (MobileFloatingMenu) supaya sembunyi
-  // selama FAB aksi tabel ini ada di layar — cegah dua tombol menumpuk.
+
   useRegisterPageActionFab(actions.length > 0);
 
   return (
     <>
-      {/* Backdrop tipis saat terbuka, supaya sentuhan di luar cincin menutup menu. */}
+
       <AnimatePresence>
         {open ? (
           <motion.div
@@ -245,59 +192,56 @@ function MobileFabActionMenu({ onAction, disabledActions, actions }: MobileFabPr
         ) : null}
       </AnimatePresence>
 
-      <div className="fixed bottom-20 right-8 z-50 sm:right-10">
-        <div className="relative h-0 w-0">
-          <AnimatePresence>
-            {open
-              ? actions.map((action, index) => {
-                  // Sapuan -5°..-355° (350° total, searah jarum jam lewat
-                  // atas/kiri/bawah) — cuma celah ~10° di sisi kanan
-                  // langsung (mengarah keluar layar) yang dilewati.
-                  const angleDeg = actions.length > 1 ? -5 + index * (-350 / (actions.length - 1)) : -90;
-                  const angleRad = (angleDeg * Math.PI) / 180;
-                  const x = Math.cos(angleRad) * RADIAL_RADIUS;
-                  const y = Math.sin(angleRad) * RADIAL_RADIUS;
-                  const isDisabled = disabledActions.includes(action.key);
-                  return (
-                    <motion.button
-                      key={action.key}
-                      type="button"
-                      disabled={isDisabled}
-                      aria-label={action.label}
-                      title={action.label}
-                      onClick={() => {
-                        onAction?.(action.key);
-                        setOpen(false);
-                      }}
-                      initial={{ opacity: 0, x: 0, y: 0, scale: 0.4 }}
-                      animate={{ opacity: 1, x, y, scale: 1 }}
-                      exit={{ opacity: 0, x: 0, y: 0, scale: 0.4 }}
-                      transition={{ type: 'spring', stiffness: 320, damping: 22, delay: index * 0.03 }}
-                      whileTap={isDisabled ? undefined : { scale: 0.9 }}
-                      className="absolute flex h-11 w-11 items-center justify-center rounded-full border border-borderSoft bg-surface text-accentDark shadow-lg disabled:cursor-not-allowed disabled:opacity-40"
-                      style={{ left: 0, top: 0 }}
-                    >
-                      {action.icon}
-                    </motion.button>
-                  );
-                })
-              : null}
-          </AnimatePresence>
+      <div className="fixed bottom-32 right-16 z-50 sm:right-20">
 
-          <motion.button
-            type="button"
-            onClick={() => setOpen((prev) => !prev)}
-            aria-label={open ? 'Tutup menu aksi' : 'Buka menu aksi'}
-            aria-expanded={open}
-            whileTap={{ scale: 0.9 }}
-            animate={{ rotate: open ? 135 : 0 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            className="absolute flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white shadow-xl"
-            style={{ left: -28, top: -28 }}
-          >
-            {open ? <X className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
-          </motion.button>
-        </div>
+        <AnimatePresence>
+          {open ? (
+            <motion.div
+              className="absolute bottom-full right-0 mb-3 grid grid-cols-2 gap-2"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {actions.map((action, index) => {
+                const isDisabled = disabledActions.includes(action.key);
+                return (
+                  <motion.button
+                    key={action.key}
+                    type="button"
+                    disabled={isDisabled}
+                    aria-label={action.label}
+                    title={action.label}
+                    onClick={() => {
+                      onAction?.(action.key);
+                      setOpen(false);
+                    }}
+                    initial={{ opacity: 0, y: 12, scale: 0.5 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 12, scale: 0.5 }}
+                    transition={{ type: 'spring', stiffness: 320, damping: 24, delay: index * 0.025 }}
+                    whileTap={isDisabled ? undefined : { scale: 0.9 }}
+                    className="flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-2xl border border-borderSoft bg-surface text-accentDark shadow-lg disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {action.icon}
+                  </motion.button>
+                );
+              })}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
+        <motion.button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          aria-label={open ? 'Tutup menu aksi' : 'Buka menu aksi'}
+          aria-expanded={open}
+          whileTap={{ scale: 0.9 }}
+          animate={{ rotate: open ? 135 : 0 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white shadow-xl"
+        >
+          {open ? <X className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
+        </motion.button>
       </div>
     </>
   );

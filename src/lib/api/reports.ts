@@ -9,10 +9,6 @@ export interface ReportResponse {
   rows: PaginatedResult<ReportRow>;
 }
 
-/**
- * GET /reports/:type — dipakai oleh semua halaman laporan
- * (inventaris, barang-masuk, barang-keluar, barang-retur, gudang).
- */
 export const reportsApi = {
   get: (type: ReportType, params?: ListParams) => {
     const searchParams = new URLSearchParams();

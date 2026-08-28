@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import useSWR from 'swr';
 import { toast } from 'sonner';
 import { Trash2, Pencil, CheckCircle2, XCircle, Camera } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
@@ -10,21 +11,38 @@ import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { Modal } from '@/component/ui/Modal';
 import { Input } from '@/component/ui/FormControls';
 import { StatsRow } from '@/component/ui/StatsRow';
+import { TableSearchInput } from '@/component/ui/TableSearchInput';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
 import { barangRusakApi, type BarangRusakPayload } from '@/lib/api/modules';
-import { useResourceList } from '@/lib/hooks/useResourceList';
+import { useServerPaginatedList } from '@/lib/hooks/useServerPaginatedList';
+import { useDebouncedSearch } from '@/lib/hooks/useDebouncedSearch';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { BARANG_RUSAK_STATUS_META } from '@/lib/utils/status';
-import { resolveUploadUrl } from '@/lib/api/client';
+import { useAuthedImage } from '@/lib/hooks/useAuthedImage';
 import type { BarangRusak } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
-const EMPTY_FORM: Partial<BarangRusakPayload> = { labelBarang: '', namaBarang: '', keterangan: '' };
+const EMPTY_FORM: Partial<BarangRusakPayload> = { labelBarang: '', namaBarang: '', serialNumber: '', keterangan: '' };
 
 const CONFIRM_DELETE_MESSAGE = 'Apakah yakin ingin menghapus laporan barang rusak ini?';
+
+function FotoRusakThumbnail({ fotoUrl }: Readonly<{ fotoUrl?: string }>): React.JSX.Element {
+  const url = useAuthedImage(fotoUrl);
+  if (!fotoUrl) {
+    return <span className="text-xs text-textMuted">-</span>;
+  }
+  if (!url) {
+
+    return <div className="h-10 w-10 animate-pulse rounded-md bg-neutralBg" />;
+  }
+  return (
+
+    <img src={url} alt="Bukti kerusakan" className="h-10 w-10 rounded-md border border-borderSoft object-cover" />
+  );
+}
 
 function BarangRusakBody(): React.JSX.Element {
   const { user } = useAuth();
@@ -32,7 +50,13 @@ function BarangRusakBody(): React.JSX.Element {
   const confirm = useConfirm();
   const { requestExport, dialog: exportDialog } = useExportFormat();
 
-  const { rows, isLoading, error, mutate } = useResourceList('barang-rusak', barangRusakApi);
+  const { input: searchInput, setInput: setSearchInput, term: searchTerm } = useDebouncedSearch();
+  const { rows, isLoading, error, mutate, serverPagination } = useServerPaginatedList(
+    'barang-rusak',
+    barangRusakApi,
+    { search: searchTerm || undefined },
+  );
+  const { data: summary, mutate: mutateSummary } = useSWR('barang-rusak-summary', () => barangRusakApi.summary());
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -42,8 +66,6 @@ function BarangRusakBody(): React.JSX.Element {
   const [uploadingFotoId, setUploadingFotoId] = useState<string | null>(null);
   const fotoInputRef = useRef<HTMLInputElement>(null);
 
-  // Mode "Modify" (bulk select) supaya tombol Change/Delete di action bar
-  // punya konsep "baris terpilih" — sama pola dengan ItemsManagement.tsx.
   const [isBulkMode, setIsBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -71,6 +93,7 @@ function BarangRusakBody(): React.JSX.Element {
     setForm({
       labelBarang: row.labelBarang,
       namaBarang: row.namaBarang,
+      serialNumber: row.serialNumber ?? '',
       keterangan: row.keterangan ?? '',
     });
     setIsModalOpen(true);
@@ -95,6 +118,7 @@ function BarangRusakBody(): React.JSX.Element {
       await barangRusakApi.uploadFoto(targetId, file);
       toast.success('Foto bukti berhasil diunggah.');
       await mutate();
+      mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal mengunggah foto bukti.'));
     } finally {
@@ -113,6 +137,7 @@ function BarangRusakBody(): React.JSX.Element {
       const payload: BarangRusakPayload = {
         labelBarang: form.labelBarang,
         namaBarang: form.namaBarang,
+        serialNumber: form.serialNumber ?? '',
         keterangan: form.keterangan ?? '',
       };
       if (editingId) {
@@ -120,10 +145,11 @@ function BarangRusakBody(): React.JSX.Element {
         toast.success('Laporan barang rusak berhasil diperbarui.');
       } else {
         await barangRusakApi.create(payload);
-        toast.success('Laporan berhasil dibuat, menunggu pengecekan fisik.');
+        toast.success('Laporan berhasil dibuat, menunggu pengecekan fisik terhadap barang.');
       }
       setIsModalOpen(false);
       await mutate();
+      mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal menyimpan laporan barang rusak.'));
     } finally {
@@ -143,6 +169,7 @@ function BarangRusakBody(): React.JSX.Element {
       await barangRusakApi.remove(row.id);
       toast.success('Laporan berhasil dihapus.');
       await mutate();
+      mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal menghapus laporan.'));
     }
@@ -153,8 +180,8 @@ function BarangRusakBody(): React.JSX.Element {
       title: jenis === 'retur' ? 'Tandai Bisa Diretur?' : 'Tandai Rusak (Tidak Bisa Diretur)?',
       message:
         jenis === 'retur'
-          ? 'Hasil pengecekan fisik akan dikunci sebagai "Bisa Diretur" — barang akan diproses retur ke supplier.'
-          : 'Hasil pengecekan fisik akan dikunci sebagai "Rusak" — barang tidak bisa diretur ke supplier.',
+          ? 'Hasil pengecekan fisik akan dikunci sebagai "Bisa Diretur" barang akan diproses retur.'
+          : 'Hasil pengecekan fisik akan dikunci sebagai "Rusak" barang tidak bisa diretur.',
       confirmLabel: 'Ya, Simpan',
       variant: jenis === 'retur' ? 'default' : 'danger',
     });
@@ -163,6 +190,7 @@ function BarangRusakBody(): React.JSX.Element {
       await barangRusakApi.inspeksi(row.id, jenis);
       toast.success('Hasil pengecekan berhasil disimpan.');
       await mutate();
+      mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal menyimpan hasil pengecekan.'));
     }
@@ -170,16 +198,20 @@ function BarangRusakBody(): React.JSX.Element {
 
   const EXPORT_COLUMNS = [
     { header: 'Label/Kode Barang', accessor: (r: BarangRusak) => r.labelBarang },
+    { header: 'Kode Barang (SKU)', accessor: (r: BarangRusak) => r.kodeBarang ?? '-' },
     { header: 'Nama Barang', accessor: (r: BarangRusak) => r.namaBarang },
+    { header: 'Merek', accessor: (r: BarangRusak) => r.merek ?? '-' },
+    { header: 'Tipe', accessor: (r: BarangRusak) => r.tipe ?? '-' },
+    { header: 'Serial Number', accessor: (r: BarangRusak) => r.serialNumber ?? '-' },
     { header: 'Keterangan', accessor: (r: BarangRusak) => r.keterangan ?? '-' },
     { header: 'Pelapor', accessor: (r: BarangRusak) => r.pelapor ?? '-' },
     { header: 'Status', accessor: (r: BarangRusak) => r.status },
     { header: 'Pemeriksa', accessor: (r: BarangRusak) => r.pemeriksa ?? '-' },
   ];
   const PDF_META = {
-    title: 'Rekap Data Gudang — Barang Rusak',
+    title: 'Rekap Data Barang Rusak',
     subtitle: 'Menu Utama / Barang Rusak',
-    description: 'Daftar laporan barang rusak/retur beserta status hasil pengecekan fisik.',
+    description: 'Kumpulan Data Barang rusak/retur beserta status hasil pengecekan fisik.',
   };
 
   function handleExport(): void {
@@ -204,7 +236,7 @@ function BarangRusakBody(): React.JSX.Element {
 
   async function handleBulkDelete(selectedRows: BarangRusak[]): Promise<void> {
     if (!isBulkMode || selectedRows.length === 0) {
-      toast('Aktifkan "Modify" dulu, lalu pilih satu atau beberapa laporan yang mau dihapus.');
+      toast('Silakan Aktifkan "Modify" terlebih dahulu untuk memilih salah satu data yang mau dihapus.');
       return;
     }
     const ok = await confirm({
@@ -219,6 +251,7 @@ function BarangRusakBody(): React.JSX.Element {
       toast.success(`${selectedRows.length} laporan berhasil dihapus.`);
       setSelectedIds(new Set());
       await mutate();
+      mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Sebagian/semua laporan gagal dihapus.'));
     }
@@ -271,18 +304,17 @@ function BarangRusakBody(): React.JSX.Element {
     {
       key: 'foto',
       header: 'Foto',
-      render: (row) => {
-        const url = resolveUploadUrl(row.fotoUrl);
-        return url ? (
-          // eslint-disable-next-line @next/next/no-img-element -- foto disajikan dari domain backend terpisah
-          <img src={url} alt="Bukti kerusakan" className="h-10 w-10 rounded-md border border-borderSoft object-cover" />
-        ) : (
-          <span className="text-xs text-textMuted">-</span>
-        );
-      },
+      render: (row) => <FotoRusakThumbnail fotoUrl={row.fotoUrl} />,
     },
     { key: 'label', header: 'Label / Kode', render: (row) => <span className="font-mono text-xs">{row.labelBarang}</span> },
+    { key: 'kode-barang', header: 'Kode Barang (SKU)', render: (row) => <span className="font-mono text-xs">{row.kodeBarang ?? '-'}</span> },
     { key: 'nama', header: 'Nama Barang', render: (row) => row.namaBarang },
+    {
+      key: 'merek-tipe',
+      header: 'Merek / Tipe',
+      render: (row) => [row.merek, row.tipe].filter(Boolean).join(' ') || '-',
+    },
+    { key: 'sn', header: 'Serial Number', render: (row) => <span className="font-mono text-xs">{row.serialNumber ?? '-'}</span> },
     { key: 'keterangan', header: 'Keterangan', render: (row) => row.keterangan || '-' },
     { key: 'pelapor', header: 'Pelapor', render: (row) => row.pelapor ?? '-' },
     {
@@ -357,26 +389,19 @@ function BarangRusakBody(): React.JSX.Element {
     <PageShell title="Barang Rusak" breadcrumb="Manajemen / Barang Rusak">
       <StatsRow
         stats={[
-          { id: 'pengecekan', label: 'Menunggu Pengecekan', value: rows.filter((r) => r.status === 'pengecekan').length },
-          { id: 'retur', label: 'Bisa Diretur', value: rows.filter((r) => r.status === 'retur').length },
-          { id: 'rusak', label: 'Rusak', value: rows.filter((r) => r.status === 'rusak').length },
-          { id: 'total', label: 'Total Laporan', value: rows.length },
+          { id: 'pengecekan', label: 'Menunggu Pengecekan', value: summary?.pengecekan ?? 0 },
+          { id: 'retur', label: 'Bisa Diretur', value: summary?.retur ?? 0 },
+          { id: 'rusak', label: 'Rusak', value: summary?.rusak ?? 0 },
+          { id: 'total', label: 'Total Laporan', value: summary?.total ?? 0 },
         ]}
       />
-      {/* visibleActions: Add/Change/Delete/Export/Print/Modify aktif —
-          Change/Delete kini punya konsep "baris terpilih" lewat mode
-          Modify (centang baris di kolom kiri), sama pola dengan Kelola
-          Barang. "Protect" SENGAJA tidak ditampilkan: modul ini tidak
-          punya kolom is_protected/endpoint Protect di backend (lihat
-          internal/model/barang_rusak.go), beda dengan barang.go. Ikon
-          Edit/Hapus/Inspeksi per baris di kolom Aksi tetap ada untuk
-          laporan berstatus "Menunggu Pengecekan". */}
+
       <DataTable
         title="Daftar Laporan Barang Rusak"
         description={
           isBulkMode
-            ? `Mode Modify aktif — ${selectedIds.size} laporan terpilih. Pilih baris lalu pakai Change/Delete di atas.`
-            : "Laporan barang rusak/retur — status default 'Menunggu Pengecekan' sampai diperiksa fisik oleh Admin/Super Admin"
+            ? `Mode Modify aktif ${selectedIds.size}. Silakan pilih data per baris lalu gunakan Change/Delete di atas.`
+            : "Laporan barang rusak/retur status default 'Menunggu Pengecekan' sampai diperiksa fisik oleh Admin/Super Admin"
         }
         columns={columns}
         rows={rows}
@@ -386,6 +411,8 @@ function BarangRusakBody(): React.JSX.Element {
         onRowAction={handleRowAction}
         visibleActions={['add', 'change', 'delete', 'export', 'print', 'modify']}
         module="barang_rusak"
+        serverPagination={serverPagination}
+        toolbar={<TableSearchInput value={searchInput} onChange={setSearchInput} placeholder="Cari label/nama barang......" />}
       />
 
       <Modal
@@ -414,6 +441,12 @@ function BarangRusakBody(): React.JSX.Element {
           label="Nama Barang"
           value={form.namaBarang ?? ''}
           onChange={(event) => setForm({ ...form, namaBarang: event.target.value })}
+        />
+        <Input
+          label="Serial Number (opsional)"
+          value={form.serialNumber ?? ''}
+          onChange={(event) => setForm({ ...form, serialNumber: event.target.value })}
+          placeholder="apabila barang memiliki Serial Number (SN)"
         />
         <Input
           label="Keterangan (opsional)"

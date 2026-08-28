@@ -1,10 +1,6 @@
 import { camelizeKeysDeep, snakeizeKeysDeep } from '@/lib/utils/casing';
 import type { ApiEnvelope, ApiError, FieldError } from '@/types';
 
-/**
- * Base URL backend gostock. Backend memasang seluruh route di bawah
- * prefix `/stockrsd` (lihat internal/routes/router.go), BUKAN `/api/v1`.
- */
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080/stockrsd';
 
 const ACCESS_TOKEN_KEY = 'stockrsd_access_token';
@@ -33,15 +29,6 @@ function writeStorage(key: string, value: string | null): void {
 export const getAccessToken = (): string | null => readStorage(ACCESS_TOKEN_KEY);
 export const getRefreshToken = (): string | null => readStorage(REFRESH_TOKEN_KEY);
 
-/**
- * Flag sesi non-sensitif untuk `middleware.ts` (pola ala Clerk: middleware
- * di edge mengecek keberadaan sesi SEBELUM halaman dirender, supaya
- * halaman terproteksi tidak sempat "kelihatan" sekilas sebelum redirect).
- * Token asli (access/refresh) TETAP di localStorage & dikirim manual lewat
- * header Authorization seperti sebelumnya — cookie ini isinya cuma "1",
- * tidak membawa kredensial apa pun, jadi tidak menambah permukaan risiko
- * walau bisa dibaca lewat document.cookie.
- */
 const SESSION_FLAG_COOKIE = 'stockrsd_has_session';
 
 function setSessionFlagCookie(present: boolean): void {
@@ -49,8 +36,7 @@ function setSessionFlagCookie(present: boolean): void {
     return;
   }
   if (present) {
-    // SameSite=Lax + tanpa flag Secure eksplisit (browser modern otomatis
-    // mewajibkan Secure untuk cookie non-httpOnly di origin https).
+
     document.cookie = `${SESSION_FLAG_COOKIE}=1; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
   } else {
     document.cookie = `${SESSION_FLAG_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
@@ -63,14 +49,6 @@ export const setAccessToken = (token: string | null): void => {
 };
 export const setRefreshToken = (token: string | null): void => writeStorage(REFRESH_TOKEN_KEY, token);
 
-/**
- * Token verifikasi anti-bot (bukan token login). Backend gostock memasang
- * middleware `BotCheck` di depan HAMPIR semua route (termasuk /auth/*,
- * lihat router.go) yang mewajibkan header `X-Bot-Token` valid. Token ini
- * didapat lewat alur captcha di POST /security/verify | /security/challenge,
- * dan DIROTASI oleh server di setiap response — makanya setiap response
- * di sini selalu dicek ulang untuk header X-Bot-Token yang baru.
- */
 export const getBotToken = (): string | null => readStorage(BOT_TOKEN_KEY);
 export const setBotToken = (token: string | null): void => writeStorage(BOT_TOKEN_KEY, token);
 
@@ -91,8 +69,6 @@ class HttpError extends Error implements ApiError {
   }
 }
 
-/** Dilempar khusus saat backend membalas 428 (bot-check diperlukan/kedaluwarsa)
- * supaya UI bisa menampilkan modal captcha alih-alih pesan error generik. */
 export class BotCheckRequiredError extends Error {
   constructor() {
     super('verifikasi anti-bot diperlukan');
@@ -117,9 +93,9 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
-  /** Lewati penyisipan header Authorization (dipakai sebelum login). */
+
   skipAuth?: boolean;
-  /** Lewati penyisipan header X-Bot-Token (dipakai oleh endpoint /security & /captcha sendiri). */
+
   skipBotToken?: boolean;
 }
 
@@ -128,17 +104,6 @@ interface EnvelopeResult<TResponse> {
   meta: PaginationMeta | undefined;
 }
 
-/**
- * Refresh access token OTOMATIS saat kedaluwarsa — access token cuma
- * berumur 15 menit (JWT_ACCESS_EXPIRY_MINUTES), jadi tanpa ini SETIAP
- * aksi (simpan form, dst.) yang dilakukan lebih dari 15 menit setelah
- * login/refresh terakhir akan SELALU gagal dengan "token tidak valid
- * atau kedaluwarsa" — persis kondisi yang tadinya membingungkan karena
- * user tetap terlihat "login" (halaman tidak redirect ke /login) padahal
- * token di baliknya sudah basi. `refreshPromise` di-share supaya banyak
- * request yang gagal bersamaan tidak memicu banyak panggilan refresh
- * paralel (cukup satu, yang lain menunggu hasil yang sama).
- */
 let refreshPromise: Promise<boolean> | null = null;
 
 async function refreshAccessToken(): Promise<boolean> {
@@ -182,13 +147,6 @@ async function refreshAccessToken(): Promise<boolean> {
   return refreshPromise;
 }
 
-/**
- * Inti pengambilan data yang dipakai `apiRequest`/`apiRequestWithMeta` —
- * ekstrak jadi satu fungsi supaya logika retry-setelah-refresh-token tidak
- * perlu ditulis dua kali. `isRetry` mencegah retry berulang tanpa akhir
- * kalau refresh sendiri juga gagal (mis. refresh token juga sudah
- * kedaluwarsa — dalam kasus itu, sesi memang harus login ulang).
- */
 async function executeRequest<TResponse>(
   path: string,
   options: RequestOptions,
@@ -200,6 +158,13 @@ async function executeRequest<TResponse>(
     'Content-Type': 'application/json',
     Accept: 'application/json',
   };
+
+  try {
+    headers['X-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    // Intl tidak tersedia (lingkungan sangat lawas) — biarkan tanpa
+    // header ini, backend cuma jatuh balik ke "-" seperti sebelumnya.
+  }
 
   const accessToken = skipAuth ? null : getAccessToken();
   if (accessToken) {
@@ -218,39 +183,22 @@ async function executeRequest<TResponse>(
     signal,
   });
 
-  // Server merotasi bot-token di setiap respons (lihat botcheck_middleware.go) —
-  // simpan token terbaru supaya request berikutnya tetap lolos gerbang.
   const rotatedBotToken = response.headers.get(BOT_TOKEN_HEADER);
   if (rotatedBotToken) {
     setBotToken(rotatedBotToken);
   }
 
-  // Access token kedaluwarsa -> coba refresh SEKALI, lalu ulangi request
-  // asli dengan token baru. Tidak berlaku untuk request yang memang tidak
-  // butuh auth (skipAuth) atau yang sudah pernah di-retry sebelumnya.
   if (response.status === 401 && !skipAuth && !isRetry) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       return executeRequest<TResponse>(path, options, true);
     }
-    // Refresh token juga sudah tidak berlaku -> sesi memang harus diulang
-    // dari awal; bersihkan token basi supaya UI tidak terjebak "terlihat
-    // login" padahal tidak ada token valid sama sekali.
+
     clearSession();
   }
 
   const rawEnvelope = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null;
 
-  // Beberapa deployment backend gostock membalas gerbang anti-bot dengan
-  // status non-428 (mis. 401/403) tapi tetap membawa pesan yang menyuruh
-  // menuntaskan captcha di /security/challenge. Deteksi juga polanya di
-  // pesan supaya UI tetap memicu modal captcha, bukan cuma teks error datar.
-  // Fallback berbasis kata kunci ini SENGAJA dilewati untuk endpoint yang
-  // skipBotToken=true (yaitu /captcha & /security sendiri) — endpoint itu
-  // wajar membalas pesan yang memuat kata "captcha" untuk error aslinya
-  // sendiri (mis. "gagal membuat captcha", "jawaban captcha salah"), dan
-  // tanpa pengecualian ini pesan asli itu akan salah tertangkap sebagai
-  // "perlu bot-check lagi" alih-alih ditampilkan apa adanya ke user.
   const looksLikeBotCheck =
     response.status === 428 ||
     (!skipBotToken &&
@@ -275,14 +223,6 @@ async function executeRequest<TResponse>(
   return { data: envelope.data as TResponse, meta: envelope.meta as PaginationMeta | undefined };
 }
 
-/**
- * Client HTTP tipis di atas fetch untuk memanggil REST API gostock.
- * - Membongkar Envelope `{ success, message, data, errors }` jadi `data` langsung.
- * - Menyisipkan `Authorization: Bearer <access_token>` otomatis.
- * - Menyisipkan & memperbarui `X-Bot-Token` otomatis (server merotasinya tiap respons).
- * - Refresh access token otomatis sekali kalau kedaluwarsa (lihat executeRequest).
- * - Melempar `BotCheckRequiredError` saat status 428 supaya UI bisa memicu modal captcha.
- */
 export async function apiRequest<TResponse>(
   path: string,
   options: RequestOptions = {},
@@ -291,12 +231,6 @@ export async function apiRequest<TResponse>(
   return data;
 }
 
-/**
- * Sama seperti `apiRequest`, tapi juga mengembalikan `meta` dari envelope
- * (dipakai endpoint list yang berpaginasi — lihat pkg/utils/response.go
- * `OKWithMeta` di backend, yang menaruh info halaman di `meta`, BUKAN
- * disisipkan ke dalam `data`).
- */
 export async function apiRequestWithMeta<TResponse>(
   path: string,
   options: RequestOptions = {},
@@ -313,7 +247,7 @@ export interface PaginationMeta {
 
 export const apiClient = {
   get: <T>(path: string, options?: RequestOptions) => apiRequest<T>(path, { method: 'GET', ...options }),
-  /** Untuk endpoint list yang berpaginasi (mengembalikan `meta` dari backend). */
+
   getPaginated: <T>(path: string, signal?: AbortSignal) =>
     apiRequestWithMeta<T[]>(path, { method: 'GET', signal }),
   post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
@@ -323,17 +257,6 @@ export const apiClient = {
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
 };
 
-/**
- * Unduh file biner (Excel/PDF/DOCX, dsb) dari backend — beda dari
- * `apiClient.*` di atas yang selalu mengharap balasan JSON. Dipakai untuk
- * endpoint seperti `/laporan/export` yang membalas file langsung lewat
- * header Content-Disposition, bukan `{ data, meta }`.
- */
-/**
- * Fetch GET biasa + header Authorization, dengan retry-setelah-refresh-token
- * sekali kalau kena 401 — dipakai bareng oleh `downloadFile` &
- * `fetchAuthedBlobUrl` di bawah supaya logikanya tidak duplikat.
- */
 async function fetchWithAuthRetry(path: string, isRetry = false): Promise<Response> {
   const accessToken = getAccessToken();
   const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -379,30 +302,6 @@ export async function downloadFile(path: string, suggestedFilename?: string): Pr
 
 export { HttpError };
 
-/**
- * Ambil resource biner yang butuh login (mis. GET /users/:id/avatar — lihat
- * ServeAvatar di internal/controller/users/user_controller.go, WAJIB header
- * Authorization) dan kembalikan sebagai object URL (`URL.createObjectURL`)
- * yang bisa langsung dipakai di `<img src>`.
- *
- * KENAPA INI PERLU: tag `<img src="...">` browser TIDAK bisa disuruh
- * menyisipkan header custom seperti Authorization — beda dari
- * `apiRequest`/`apiClient` yang manual fetch + header. Endpoint avatar
- * sengaja mewajibkan token (foto profil = data pribadi, tidak boleh
- * dibuka siapa saja lewat URL statis, lihat catatan di ServeAvatar), jadi
- * satu-satunya cara menampilkannya di <img> adalah fetch manual dulu lalu
- * ubah hasilnya jadi blob URL — persis pola yang sudah dipakai
- * `downloadFile` di atas, cuma di sini hasilnya dipakai untuk ditampilkan,
- * bukan diunduh.
- *
- * `path` relatif terhadap API_BASE_URL (mis. "/users/5/avatar?v=123",
- * hasil dari field `avatar_url` di Response backend) — BUKAN API_ORIGIN
- * seperti `resolveUploadUrl`, karena route ini terdaftar di bawah grup
- * `/stockrsd` (lihat internal/routes/router.go), bukan static root.
- * Mengembalikan `null` kalau resource tidak ada (404, mis. user belum
- * pernah upload foto) supaya pemanggil bisa jatuh ke avatar inisial tanpa
- * dianggap error.
- */
 export async function fetchAuthedBlobUrl(path: string): Promise<string | null> {
   const response = await fetchWithAuthRetry(path);
   if (response.status === 404) {
@@ -415,13 +314,6 @@ export async function fetchAuthedBlobUrl(path: string): Promise<string | null> {
   return URL.createObjectURL(blob);
 }
 
-/**
- * Origin backend TANPA path prefix (`/stockrsd`) — dipakai untuk resolve
- * URL file yang disajikan statis di root app, seperti foto profil hasil
- * upload (`/uploads/avatars/xxx.jpg`, lihat app.Static("/uploads", ...) di
- * internal/routes/router.go). BEDA dari API_BASE_URL yang sudah termasuk
- * `/stockrsd` untuk endpoint REST.
- */
 export const API_ORIGIN = (() => {
   try {
     return new URL(API_BASE_URL).origin;
@@ -430,21 +322,12 @@ export const API_ORIGIN = (() => {
   }
 })();
 
-/** Gabungkan path relatif (mis. avatarUrl dari backend) dengan API_ORIGIN.
- * Path yang sudah absolut (http/https) dikembalikan apa adanya. */
 export function resolveUploadUrl(path?: string | null): string | undefined {
   if (!path) return undefined;
   if (/^https?:\/\//i.test(path)) return path;
   return `${API_ORIGIN}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-/**
- * Upload file (multipart/form-data) ke backend — beda dari `apiClient.*`
- * yang selalu mengirim JSON. Dipakai untuk endpoint seperti
- * `POST /users/me/avatar` (lihat internal/controller/users UploadAvatar).
- * `fieldName` harus sama persis dengan nama field yang dibaca backend lewat
- * `c.FormFile("...")`.
- */
 export async function uploadFile<TResponse>(
   path: string,
   file: File,
@@ -462,7 +345,7 @@ export async function uploadFile<TResponse>(
 
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
-      headers, // JANGAN set Content-Type manual — browser mengisi boundary multipart otomatis
+      headers,
       body: formData,
     });
 

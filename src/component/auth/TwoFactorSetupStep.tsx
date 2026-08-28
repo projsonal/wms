@@ -10,20 +10,16 @@ import { useIsMobileDevice } from '@/lib/hooks/use-mobile-device';
 const EXPIRY_SECONDS = 5 * 60;
 
 interface TwoFactorSetupStepProps {
-  /** Secret TOTP mentah dari backend — dipakai untuk generate QR di
-   * browser (lihat lib/utils/totp-qr.ts) sekaligus ditampilkan sebagai
-   * entri manual. Tidak lagi bergantung pada gambar QR dari backend,
-   * supaya selalu tampil walau endpoint gambarnya bermasalah. */
+
   secret: string;
-  /** Label akun yang ditempel ke QR, biasanya username. */
+
   accountLabel: string;
   otp: string;
   onOtpChange: (value: string) => void;
   onCancel: () => void;
   onActivate: () => void;
   isSubmitting: boolean;
-  /** Dipanggil saat kode QR kedaluwarsa (timer habis) supaya pemanggil
-   * bisa minta secret baru dari backend lalu kembali ke layar generate ini. */
+
   onExpire?: () => void;
 }
 
@@ -40,18 +36,14 @@ interface QrDisplayProps {
   onRetry?: () => void;
 }
 
-/** Area gambar QR: tampilkan hasil generate, atau status memuat/gagal/menunggu data. */
-function QrDisplay({ qrDataUrl, qrError, secret, onRetry }: QrDisplayProps): React.JSX.Element {
-  // Deteksi PERANGKAT (User-Agent), bukan cuma lebar layar — supaya tombol
-  // unduh selalu tampil di HP/tablet sungguhan, tapi tidak ikut nongol di
-  // browser desktop yang jendelanya cuma diperkecil (beda dari pendekatan
-  // lama yang pakai class Tailwind `sm:hidden`).
+function QrDisplay({ qrDataUrl, qrError, secret, onRetry }: Readonly<QrDisplayProps>): React.JSX.Element {
+
   const isMobileDevice = useIsMobileDevice();
 
   if (qrDataUrl) {
     return (
       <div className="flex flex-col items-center gap-2">
-        {/* eslint-disable-next-line @next/next/no-img-element -- data URL hasil generate lokal, tidak perlu optimisasi Next/Image */}
+
         <img
           src={qrDataUrl}
           alt="QR kode aktivasi two factor authentication"
@@ -100,20 +92,15 @@ export function TwoFactorSetupStep({
   onActivate,
   isSubmitting,
   onExpire,
-}: TwoFactorSetupStepProps): React.JSX.Element {
+}: Readonly<TwoFactorSetupStepProps>): React.JSX.Element {
   const [secondsLeft, setSecondsLeft] = useState(EXPIRY_SECONDS);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [qrError, setQrError] = useState<string | null>(null);
   const isExpired = secondsLeft <= 0;
 
-  // Generate ulang QR di browser setiap kali secret berubah (mis. setelah
-  // "Minta QR Baru"), dan reset timer 5:00 bersamaan.
   useEffect(() => {
     let cancelled = false;
-    // Reset tampilan saat secret baru diterima dari server (prop berubah) —
-    // pola sinkronisasi state lokal terhadap data eksternal, bukan reaksi
-    // berantai ke state React lain.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     setQrError(null);
     setQrDataUrl('');
     if (!secret) {
@@ -160,8 +147,8 @@ export function TwoFactorSetupStep({
       <div>
         <h2 className="text-base font-semibold text-text">Aktifkan Two Factor Authentication</h2>
         <p className="mt-1 text-xs text-textMuted">
-          Silahkan scan barcode menggunakan apk Authenticator google untuk memverifikasi kode OTP
-          yang akan diterima.
+          Silahkan scan barcode menggunakan aplikasi Authenticator google untuk memverifikasi kode OTP
+          yang akan diterima. silakan download terlebih dahulu di handphone Anda
         </p>
       </div>
 
@@ -184,7 +171,7 @@ export function TwoFactorSetupStep({
           {secret ? (
             <div className="flex flex-col gap-1 rounded-md bg-neutralBg p-3">
               <p className="text-xs text-textMuted">
-                Tidak bisa scan? Masukkan kode ini secara manual di aplikasi Authenticator:
+                Tidak bisa scan? Silakan masukkan kode secara manual di aplikasi Authenticator:
               </p>
               <code className="select-all break-all rounded bg-surface px-2 py-1.5 font-mono text-sm font-semibold text-text">
                 {secret}
@@ -193,7 +180,7 @@ export function TwoFactorSetupStep({
           ) : null}
 
           <p className="text-xs text-textMuted">
-            Silakan masukkan kode OTP yang ada di apk tersebut di bawah, supaya akun kamu aman.
+            Silakan masukkan kode OTP yang ada di aplikasi Authenticator google, supaya akun kamu aman.
           </p>
           <OtpInput value={otp} onChange={onOtpChange} />
           <p className="text-xs text-textMuted">

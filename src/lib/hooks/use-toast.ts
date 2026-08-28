@@ -1,7 +1,5 @@
 'use client';
 
-// Adaptasi TypeScript dari hook toast standar shadcn/ui.
-// Dipakai oleh `component/ui/shadcn/toast.tsx` & `toaster.tsx`.
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ToastActionElement, ToastProps } from '@/component/ui/shadcn/toast';

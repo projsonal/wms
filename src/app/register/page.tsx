@@ -30,21 +30,6 @@ const EMPTY_FORM: RegisterPayload = {
   captchaAnswer: '',
 };
 
-/**
- * Aplikasi internal perusahaan: TIDAK ada lagi verifikasi 2FA wajib saat
- * daftar — akun baru langsung aktif & langsung login begitu form
- * disubmit. 2FA tetap tersedia tapi jadi opsional, diaktifkan sendiri
- * lewat Settings -> Keamanan kapan pun user mau.
- *
- * Captcha GAMBAR (BUKAN humancheck seperti Lupa Password/Ubah Password —
- * lihat catatan di lib/api/security.ts) TETAP wajib di sini karena
- * backend memang mewajibkannya (RegisterRequest.CaptchaToken/CaptchaAnswer
- * validate:"required", lihat internal/controller/auth/struct.go). SEBELUM
- * PERBAIKAN INI, UI captcha-nya hilang dari halaman ini padahal backend
- * tetap mewajibkan field itu terisi — akibatnya form SELALU gagal
- * validasi ("validasi gagal") apa pun yang diisi user, karena
- * captchaToken/captchaAnswer yang dikirim selalu string kosong.
- */
 export default function RegisterPage(): React.JSX.Element {
   const router = useRouter();
   const { refreshUser } = useAuth();
@@ -74,7 +59,7 @@ export default function RegisterPage(): React.JSX.Element {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadCaptcha async
+
     loadCaptcha();
   }, []);
 
@@ -103,8 +88,7 @@ export default function RegisterPage(): React.JSX.Element {
       } else {
         setFormError('Pendaftaran gagal, silakan coba lagi.');
       }
-      // Captcha lama (kalau sempat kepakai/salah) sudah tidak valid lagi
-      // di backend — muat ulang supaya percobaan berikutnya pakai token baru.
+
       await loadCaptcha();
     } finally {
       setIsSubmitting(false);
@@ -116,7 +100,7 @@ export default function RegisterPage(): React.JSX.Element {
       window.sessionStorage.setItem('wms_show_welcome', '1');
     }
     await refreshUser();
-    router.push('/home/dashboard');
+    router.push('/dashboard');
   }
 
   const handleAuthShellKeyDown = useEnterToSubmit(handleSubmit, {

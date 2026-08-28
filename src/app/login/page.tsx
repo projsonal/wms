@@ -28,17 +28,9 @@ const STEP_INDEX: Record<Step, number> = {
   forgotPassword: 1,
 };
 
-/** Setelah gagal login 3x berturut-turut: kunci tombol masuk selama 10 detik
- * (anti-spam) dan tampilkan ajakan "lupa password" sebagai alternatif. */
 const LOCKOUT_THRESHOLD = 3;
 const LOCKOUT_SECONDS = 10;
 
-/**
- * Aplikasi internal perusahaan: TIDAK ada lagi gerbang captcha penuh-layar
- * sebelum form ini tampil (dulu <CaptchaGate>), dan 2FA TIDAK lagi
- * dipaksakan setelah login — hanya user yang SUDAH mengaktifkan sendiri
- * 2FA lewat Settings -> Keamanan yang akan diminta kode OTP di sini.
- */
 function LoginWizard(): React.JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -55,15 +47,10 @@ function LoginWizard(): React.JSX.Element {
 
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | undefined>(undefined);
 
-  // Anti-spam login: hitung kegagalan berturut-turut, kunci tombol sementara,
-  // dan tawarkan alternatif lupa password kalau kredensialnya memang salah.
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const [showForgotHint, setShowForgotHint] = useState(false);
 
-  // Lockout akun dari SERVER (mis. "akun anda dikunci sementara ... coba
-  // lagi dalam 5 menit") — beda dari lockoutSeconds di atas yang cuma
-  // anti-spam sisi klien; ini otoritatif dari backend, bisa lebih lama.
   const [accountLockoutMessage, setAccountLockoutMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -76,11 +63,6 @@ function LoginWizard(): React.JSX.Element {
     return () => clearInterval(interval);
   }, [lockoutSeconds]);
 
-  // proxy.ts menandai redirect ke sini dengan ?reason=unauthorized saat
-  // seseorang mencoba buka URL terproteksi (mis. mengetik/mengedit
-  // domain/dashboard langsung) tanpa sesi aktif — tampilkan alasannya
-  // secara eksplisit, bukan cuma diam-diam mendarat di form login tanpa
-  // penjelasan.
   useEffect(() => {
     if (searchParams.get('reason') === 'unauthorized') {
       toast.error('Halaman itu tidak boleh diakses tanpa masuk terlebih dahulu. Silakan masuk kembali.', {
@@ -109,17 +91,12 @@ function LoginWizard(): React.JSX.Element {
         setStep('verifyOtp');
         return;
       }
-      // Tidak ada 2FA aktif -> authApi.login sudah menyimpan sesi
-      // (access/refresh token) lewat persistSessionIfPresent, langsung
-      // dianggap berhasil masuk tanpa langkah tambahan apa pun.
+
       setSessionInfo(res.session);
       setStep('success');
     } catch (error) {
       const message = error instanceof HttpError ? error.message : 'Username atau password salah.';
 
-      // Backend gostock membalas dengan pesan lockout akun saat rate-limit
-      // sisi server terlampaui — tangkap polanya di sini supaya
-      // ditampilkan sebagai hitung mundur, bukan teks datar.
       if (/dikunci|terkunci/i.test(message)) {
         setAccountLockoutMessage(message);
         return;

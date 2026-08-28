@@ -17,20 +17,12 @@ type Granularitas = 'harian' | 'bulanan' | 'tahunan';
 interface ReportPageTemplateProps {
   title: string;
   breadcrumb: string;
-  /** Nilai `tipe` yang dikenali backend (GET /laporan/export|preview?tipe=...) —
-   * lihat reportTitles di internal/controller/laporan/laporan_controller.go.
-   * Kalau undefined, halaman menampilkan pesan jujur "belum ada data"
-   * daripada data karangan. */
+
   reportType?: string;
-  /** false untuk laporan yang chart-nya BUKAN deret waktu (mis. Laporan
-   * Stok Barang — snapshot top 10 stok, tidak ada sumbu harian/bulanan/
-   * tahunan yang masuk akal) — menyembunyikan selector granularitas. */
+
   hasDateGranularity?: boolean;
 }
 
-/** Baris generik {header: value} — backend mengirim headers[]+rows[][]
- * yang bentuknya beda-beda tiap tipe laporan, jadi tabelnya dibangun
- * dinamis dari situ, bukan kolom tetap seperti versi dummy sebelumnya. */
 function toGenericRows(headers: string[], rows: string[][]): Array<Record<string, string> & { _id: string }> {
   return rows.map((row, idx) => {
     const obj: Record<string, string> = {};
@@ -52,7 +44,7 @@ export function ReportPageTemplate({
   breadcrumb,
   reportType,
   hasDateGranularity = true,
-}: ReportPageTemplateProps): React.JSX.Element {
+}: Readonly<ReportPageTemplateProps>): React.JSX.Element {
   const { user } = useAuth();
   const [granularitas, setGranularitas] = useState<Granularitas>('bulanan');
   const { data, isLoading } = useSWR(
@@ -68,8 +60,6 @@ export function ReportPageTemplate({
     render: (row) => row[h] ?? '-',
   }));
 
-  // recharts butuh array-of-object, bukan {labels, values} paralel —
-  // digabung di sini SEKALI, bukan di render loop.
   const chartRows =
     data?.chart?.labels.map((label, i) => ({
       label,
@@ -89,6 +79,28 @@ export function ReportPageTemplate({
     );
   }
 
+  let chartContent: React.JSX.Element;
+  if (isLoading) {
+    chartContent = <p className="flex h-full items-center justify-center text-xs text-textMuted">Memuat chart...</p>;
+  } else if (chartRows.length === 0) {
+    chartContent = (
+      <p className="flex h-full items-center justify-center text-center text-xs text-textMuted">
+        Belum ada data yang cukup untuk periode ini.
+      </p>
+    );
+  } else {
+    chartContent = (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartRows} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a7b74' }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 12, fill: '#8a7b74' }} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #f0dad2', fontSize: 12 }} />
+          <Bar dataKey="value" fill="#b3471f" radius={[4, 4, 0, 0]} isAnimationActive animationDuration={900} />
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+
   return (
     <PageShell
       title={title}
@@ -105,9 +117,6 @@ export function ReportPageTemplate({
             }))}
           />
 
-          {/* Analisa Data — chart disesuaikan otomatis per tipe laporan oleh
-              backend (deret waktu untuk laporan bertanggal, top-10 stok
-              untuk Laporan Stok Barang) — lihat internal/controller/laporan/chart.go. */}
           <Card className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-base font-semibold text-text">
@@ -131,22 +140,7 @@ export function ReportPageTemplate({
               ) : null}
             </div>
             <div className="h-64 w-full">
-              {isLoading ? (
-                <p className="flex h-full items-center justify-center text-xs text-textMuted">Memuat chart...</p>
-              ) : chartRows.length === 0 ? (
-                <p className="flex h-full items-center justify-center text-center text-xs text-textMuted">
-                  Belum ada data yang cukup untuk periode ini.
-                </p>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartRows} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a7b74' }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 12, fill: '#8a7b74' }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #f0dad2', fontSize: 12 }} />
-                    <Bar dataKey="value" fill="#b3471f" radius={[4, 4, 0, 0]} isAnimationActive animationDuration={900} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
+              {chartContent}
             </div>
           </Card>
 
@@ -157,11 +151,7 @@ export function ReportPageTemplate({
             rows={genericRows}
             getRowId={(row) => row._id}
             isLoading={isLoading}
-            // Laporan bersifat read-only (sudah ada tombol "Unduh Laporan"
-            // di header) — Add/Change/Delete/Modify/Protect tidak relevan
-            // untuk baris hasil agregasi laporan. Print tetap diaktifkan
-            // untuk super admin (rekap PDF A4 langsung dari data yang
-            // tampil, terpisah dari tombol "Unduh Laporan" bawaan).
+
             visibleActions={['print']}
             onRowAction={(action) => {
               if (action === 'print') handlePrint();

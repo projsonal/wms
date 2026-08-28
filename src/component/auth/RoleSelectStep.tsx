@@ -8,27 +8,19 @@ interface RoleSelectStepProps {
   onSelectRole: (role: UserRole) => void;
 }
 
-/** Ikon per role — dipilih supaya langsung intuitif tanpa perlu baca label:
- * mahkota untuk pemegang akses penuh, perisai untuk pengelola operasional,
- * helm proyek untuk pekerja lapangan/gudang. */
 const ROLE_ICON: Record<UserRole, React.ComponentType<{ className?: string }>> = {
   super_admin: Crown,
   admin: ShieldCheck,
   karyawan: HardHat,
 };
 
-export function RoleSelectStep({ selectedRole, onSelectRole }: RoleSelectStepProps): React.JSX.Element {
+export function RoleSelectStep({ selectedRole, onSelectRole }: Readonly<RoleSelectStepProps>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4 text-center">
       <div>
         <h2 className="text-base font-semibold text-text">Pilih Role Kamu</h2>
         <p className="text-xs text-textMuted">
           Tampilan &amp; Fitur sesuai kebutuhan role yang dipilih
-        </p>
-        <p className="mt-1 text-[11px] text-textMuted">
-          Backend hanya menerapkan pilihan ini di lingkungan non-production — di production,
-          akun baru selalu dibuat sebagai <strong>Karyawan</strong> dan role lain diberikan oleh
-          Super Admin lewat menu Manajemen User.
         </p>
       </div>
       <div className="grid grid-cols-3 gap-3">

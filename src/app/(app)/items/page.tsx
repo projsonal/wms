@@ -1,5 +1,5 @@
-import { ItemsManagementContent } from '@/component/gudang/ItemsManagement';
+import { redirect } from 'next/navigation';
 
-export default function Page(): React.JSX.Element {
-  return <ItemsManagementContent />;
+export default function Page(): never {
+  redirect('/kelola-barang');
 }

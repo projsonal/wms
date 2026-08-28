@@ -1,14 +1,17 @@
 'use client';
 
-/**
- * Jaring pengaman TERAKHIR — dipakai Next.js hanya kalau root layout
- * (layout.tsx) sendiri yang gagal render, jadi harus mandiri (bawa
- * <html>/<body> sendiri, TIDAK bisa memakai komponen dari layout yang
- * justru sedang error). Sengaja dibuat sangat sederhana & tanpa
- * dependency ke StatusScreen/Tailwind config supaya tetap bisa tampil
- * walau ada yang salah total di level fondasi aplikasi.
- */
-export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }): React.JSX.Element {
+import { useEffect } from 'react';
+
+export default function GlobalError({ error, reset }: Readonly<{ error: Error & { digest?: string }; reset: () => void }>): React.JSX.Element {
+  useEffect(() => {
+    void import('@/lib/logger').then(({ logger }) => {
+      logger.error(error.message || 'Root layout gagal render (global-error.tsx)', {
+        digest: error.digest,
+        stack: error.stack,
+      });
+    });
+  }, [error]);
+
   return (
     <html lang="id">
       <body
@@ -32,7 +35,7 @@ export default function GlobalError({ reset }: { error: Error & { digest?: strin
         </span>
         <h1 style={{ fontSize: 24, margin: 0 }}>Aplikasi Gagal Dimuat</h1>
         <p style={{ maxWidth: 420, fontSize: 14, color: '#5b5b52' }}>
-          Terjadi kesalahan mendasar saat memuat aplikasi. Coba muat ulang halaman ini.
+          Terjadi kesalahan pada server. Coba muat ulang halaman ini.
         </p>
         <button
           type="button"

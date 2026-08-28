@@ -9,12 +9,9 @@ import { downloadFile, HttpError } from '@/lib/api/client';
 export type ReportFormat = 'Excel' | 'PDF' | 'Docs';
 
 interface ReportDownloadButtonProps {
-  /** Kode tipe laporan sesuai GET /laporan/tipe (mis. "stok-barang"). */
+
   reportType: string;
-  /** Diteruskan ke backend supaya chart yang disisipkan ke file unduhan
-   * (PDF gambar chart asli, Excel chart native) memakai granularitas
-   * YANG SAMA dengan yang sedang dilihat user di layar — bukan default
-   * bulanan tanpa peduli apa yang dipilih di UI. */
+
   granularitas?: 'harian' | 'bulanan' | 'tahunan';
 }
 
@@ -24,12 +21,7 @@ const FORMAT_OPTIONS: { format: ReportFormat; label: string; icon: typeof FileTe
   { format: 'Docs', label: 'Word (.docx)', icon: File },
 ];
 
-/**
- * Tombol "Unduh Laporan" dengan dropdown pilih format — REAL, memanggil
- * GET /laporan/export?tipe=&format= (internal/controller/laporan). Backend
- * mendukung Excel, PDF, dan Word (Docs) — lihat pkg/reportexport.
- */
-export function ReportDownloadButton({ reportType, granularitas }: ReportDownloadButtonProps): React.JSX.Element {
+export function ReportDownloadButton({ reportType, granularitas }: Readonly<ReportDownloadButtonProps>): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [downloadingFormat, setDownloadingFormat] = useState<ReportFormat | null>(null);
 
@@ -56,7 +48,12 @@ export function ReportDownloadButton({ reportType, granularitas }: ReportDownloa
       </Button>
       {isOpen ? (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
+          <button
+            type="button"
+            aria-label="Tutup pilihan format laporan"
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setIsOpen(false)}
+          />
           <div className="absolute right-0 top-full z-20 mt-2 w-44 rounded-md border border-borderSoft bg-surface py-1 shadow-card">
             {FORMAT_OPTIONS.map(({ format, label, icon: Icon }) => (
               <button

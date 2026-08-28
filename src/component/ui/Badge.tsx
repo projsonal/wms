@@ -12,11 +12,14 @@ const VARIANT_CLASSES: Record<StatusBadgeVariant, string> = {
 interface BadgeProps {
   label: string;
   variant?: StatusBadgeVariant;
+
+  title?: string;
 }
 
-export function Badge({ label, variant = 'neutral' }: BadgeProps): React.JSX.Element {
+export function Badge({ label, variant = 'neutral', title }: BadgeProps): React.JSX.Element {
   return (
     <span
+      title={title}
       className={clsx(
         'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold whitespace-nowrap',
         VARIANT_CLASSES[variant],

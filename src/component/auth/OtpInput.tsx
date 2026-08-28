@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useId, useRef } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 
 interface OtpInputProps {
@@ -11,6 +11,8 @@ interface OtpInputProps {
 
 export function OtpInput({ length = 6, value, onChange }: Readonly <OtpInputProps>): React.JSX.Element {
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
+  const inputId = useId();
+  const inputKeys = Array.from({ length }, (_, index) => `${inputId}-${index}`);
   const digits = Array.from({ length }, (_, index) => value[index] ?? '');
 
   function updateDigit(index: number, digit: string): void {
@@ -37,7 +39,7 @@ export function OtpInput({ length = 6, value, onChange }: Readonly <OtpInputProp
     <div className="flex justify-center gap-3">
       {digits.map((digit, index) => (
         <input
-          key={index}
+          key={inputKeys[index]}
           ref={(el) => {
             inputsRef.current[index] = el;
           }}

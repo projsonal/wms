@@ -22,14 +22,6 @@ import { DELIVERY_STATUS_META } from '@/lib/utils/status';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 import type { Delivery } from '@/types';
 
-/**
- * Halaman ini menampilkan resource YANG SAMA dengan Pickup & Dropoff
- * (deliveriesApi/model Pengiriman) — cuma fokusnya pemantauan real-time,
- * bukan penjadwalan. Form Tambah karena itu sengaja tidak diduplikasi di
- * sini; "Add" mengarahkan ke halaman Pickup & Dropoff yang sudah punya
- * modalnya. Change/Delete/Protect di sini beroperasi langsung ke resource
- * yang sama (aman, karena backend-nya satu sumber kebenaran).
- */
 export function DeliveryMonitoringContent(): React.JSX.Element {
   const { user } = useAuth();
   const router = useRouter();
@@ -116,7 +108,7 @@ export function DeliveryMonitoringContent(): React.JSX.Element {
     const selectedRows = rows.filter((r) => selectedIds.has(r.id));
     switch (action) {
       case 'add':
-        router.push('/home/pickup-dropoff');
+        router.push('/pickup-dropoff');
         return;
       case 'modify':
         setIsBulkMode((prev) => !prev);
@@ -127,7 +119,7 @@ export function DeliveryMonitoringContent(): React.JSX.Element {
           toast('Aktifkan "Modify", pilih tepat satu baris, lalu ubah lewat halaman Pickup & Dropoff.');
           return;
         }
-        router.push('/home/pickup-dropoff');
+        router.push('/pickup-dropoff');
         return;
       case 'delete':
         await handleBulkDelete(selectedRows);
@@ -181,7 +173,7 @@ export function DeliveryMonitoringContent(): React.JSX.Element {
       render: (row) => (
         <div className="flex items-center gap-3">
           <Link
-            href={`/home/delivery/${row.id}`}
+            href={`/delivery/${row.id}`}
             className="text-xs font-semibold text-accent hover:underline"
           >
             Lacak

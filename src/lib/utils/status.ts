@@ -1,9 +1,8 @@
 import type {
-  DeliveryStatus,
-  PurchaseOrderStatus,
   StatusBadgeVariant,
   AssetStatus,
   BarangRusakStatus,
+  DeliveryStatus,
 } from '@/types';
 
 interface StatusMeta {
@@ -15,22 +14,6 @@ export const ITEM_STATUS_META: Record<'tersedia' | 'menipis' | 'habis', StatusMe
   tersedia: { label: 'Tersedia', variant: 'success' },
   menipis: { label: 'Menipis', variant: 'warning' },
   habis: { label: 'Habis', variant: 'danger' },
-};
-
-export const PO_STATUS_META: Record<PurchaseOrderStatus, StatusMeta> = {
-  draft: { label: 'Draft', variant: 'neutral' },
-  diproses: { label: 'Diproses', variant: 'warning' },
-  dikirim: { label: 'Dikirim', variant: 'info' },
-  selesai: { label: 'Selesai', variant: 'success' },
-  dibatalkan: { label: 'Dibatalkan', variant: 'danger' },
-};
-
-export const DELIVERY_STATUS_META: Record<DeliveryStatus, StatusMeta> = {
-  menunggu: { label: 'Menunggu', variant: 'neutral' },
-  dijemput: { label: 'Dijemput', variant: 'info' },
-  perjalanan: { label: 'Transit', variant: 'warning' },
-  terkirim: { label: 'Terkirim', variant: 'success' },
-  gagal: { label: 'Gagal', variant: 'danger' },
 };
 
 export const ASSET_STATUS_META: Record<AssetStatus, StatusMeta> = {
@@ -45,6 +28,20 @@ export const BARANG_RUSAK_STATUS_META: Record<BarangRusakStatus, StatusMeta> = {
   rusak: { label: 'Rusak', variant: 'danger' },
 };
 
+export const BARANG_SERIAL_STATUS_META: Record<'tersedia' | 'terpasang' | 'rusak', StatusMeta> = {
+  tersedia: { label: 'Tersedia', variant: 'success' },
+  terpasang: { label: 'Terpasang', variant: 'info' },
+  rusak: { label: 'Rusak', variant: 'danger' },
+};
+
+export const DELIVERY_STATUS_META: Record<DeliveryStatus, StatusMeta> = {
+  menunggu: { label: 'Menunggu', variant: 'neutral' },
+  dijemput: { label: 'Menunggu Dijemput', variant: 'warning' },
+  perjalanan: { label: 'Dalam Perjalanan', variant: 'info' },
+  terkirim: { label: 'Terkirim', variant: 'success' },
+  gagal: { label: 'Gagal Kirim', variant: 'danger' },
+};
+
 export const JENIS_ASET_META: Record<string, StatusMeta> = {
   tiang: { label: 'Tiang', variant: 'info' },
   odc: { label: 'ODC', variant: 'info' },
@@ -54,14 +51,6 @@ export const JENIS_ASET_META: Record<string, StatusMeta> = {
   transportasi: { label: 'Transportasi', variant: 'neutral' },
 };
 
-/** Indikator konektivitas hasil "Cek Ping" — terpisah dari ASSET_STATUS_META
- * (kondisi fisik aset), lihat internal/model/asset.go PingStatus. */
-export const PING_STATUS_META: Record<'online' | 'offline' | 'unknown', StatusMeta> = {
-  online: { label: 'Online', variant: 'success' },
-  offline: { label: 'Offline', variant: 'danger' },
-  unknown: { label: 'Belum Dicek', variant: 'neutral' },
-};
-
 export const GENERIC_STATUS_META: Record<string, StatusMeta> = {
   aktif: { label: 'Aktif', variant: 'success' },
   nonaktif: { label: 'Nonaktif', variant: 'neutral' },
@@ -69,10 +58,7 @@ export const GENERIC_STATUS_META: Record<string, StatusMeta> = {
   selisih: { label: 'Selisih', variant: 'warning' },
   selesai: { label: 'Selesai', variant: 'success' },
   diproses: { label: 'Diproses', variant: 'warning' },
-  // Barang Masuk (& modul lain yang kebetulan simpan status berkapital di
-  // backend, lihat pkg/constant/cons_barangMasuk.go) — ditambahkan di
-  // samping versi huruf kecil di atas yang tetap dipakai modul lain
-  // (Barang Keluar/Stock Opname) yang memang simpan huruf kecil.
+
   Draft: { label: 'Draft', variant: 'warning' },
   Selesai: { label: 'Selesai', variant: 'success' },
 };

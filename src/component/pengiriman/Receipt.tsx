@@ -10,12 +10,6 @@ import { formatDate, formatNumber } from '@/lib/utils/format';
 import { DELIVERY_STATUS_META } from '@/lib/utils/status';
 import type { Delivery, DeliveryItem } from '@/types';
 
-/**
- * Identitas perusahaan yang tercetak di resi — SENGAJA beda dari nama
- * aplikasi ("WMS-RSD", lihat app/layout.tsx). Dokumen resmi seperti resi
- * harus mencantumkan nama badan usaha sesungguhnya (mengikuti referensi
- * Kopsurat_RSD.docx), sementara "WMS-RSD" adalah nama sistem/software-nya.
- */
 const COMPANY = {
   name: 'PT. Reueus Sumber Data',
   address: 'Jl. Asia Afrika 141-149 Lt.3 Cluster 7 M. Adimidjojo, Bandung',
@@ -23,10 +17,6 @@ const COMPANY = {
   phone: '0811 2111 0923',
 };
 
-/** Kurir eksternal yang kita kenali untuk ditampilkan sebagai "badge mitra"
- * di kop resi (mis. J&T/JNE) — mengikuti daftar Kerjasama Kurir di halaman
- * Supplier. Kalau nama kurir tidak cocok satupun (kurir internal/nama
- * bebas), kop cukup tampilkan "Kurir Internal". */
 const KNOWN_COURIER_BRANDS = ['JNE', 'J&T', 'SICEPAT', 'ANTERAJA', 'LALAMOVE', 'GOSEND', 'NINJA XPRESS'];
 
 function matchCourierBrand(courierName: string): string | null {
@@ -34,17 +24,10 @@ function matchCourierBrand(courierName: string): string | null {
   return KNOWN_COURIER_BRANDS.find((brand) => upper.includes(brand)) ?? null;
 }
 
-/** SKU resi punya awalan khas "WRSD-" (identitas internal WMS-RSD),
- * terpisah dari kode_barang asli di database — jadi cukup ditambahkan
- * saat tampil/cetak, bukan mengubah data SKU asli di Kelola Barang. Kalau
- * SKU sumbernya kebetulan sudah berawalan WRSD- juga, tidak dobel. */
 function formatResiSku(sku: string): string {
   return sku.toUpperCase().startsWith('WRSD-') ? sku.toUpperCase() : `WRSD-${sku}`;
 }
 
-/** Provinsi Indonesia — dipakai extractAreaLabels() membuang segmen
- * terakhir alamat kalau itu nama provinsi, supaya 2 kotak wilayah yang
- * tersisa benar-benar Kabupaten/Kota + Kecamatan (bukan ikut provinsi). */
 const INDONESIAN_PROVINCES = new Set([
   'ACEH', 'SUMATERA UTARA', 'SUMATERA BARAT', 'RIAU', 'KEPULAUAN RIAU', 'JAMBI', 'BENGKULU',
   'SUMATERA SELATAN', 'KEPULAUAN BANGKA BELITUNG', 'LAMPUNG', 'DKI JAKARTA', 'JAWA BARAT',
@@ -56,14 +39,6 @@ const INDONESIAN_PROVINCES = new Set([
   'PAPUA BARAT DAYA',
 ]);
 
-/** Ekstrak 2 label wilayah tujuan dari teks alamat bebas (`alamatTujuan`
- * tidak punya field kabupaten/kecamatan terpisah di database — cuma satu
- * string) — meniru 2 kotak "KAB. SIDOARJO" / "BUDURAN" pada label J&T:
- * kotak kiri = level lebih luas (Kabupaten/Kota), kanan = lebih sempit
- * (Kecamatan). Heuristik murni dari urutan koma alamat Indonesia yang
- * lazim ("..., Kecamatan, Kabupaten/Kota, Provinsi") — TIDAK selalu
- * akurat untuk format alamat yang tidak baku, jadi null (disembunyikan)
- * kalau segmennya kurang dari 2 setelah provinsi dibuang. */
 function extractAreaLabels(address: string): { broad: string; narrow: string } | null {
   const segments = address
     .split(',')
@@ -85,9 +60,6 @@ function totalWeightGram(items: DeliveryItem[] | undefined): number {
   return (items ?? []).reduce((sum, it) => sum + (it.weightGram ?? 0) * it.qty, 0);
 }
 
-/** Barcode Code-128 SUNGGUH-SUNGGUH terbaca (bukan garis dekoratif) via
- * jsbarcode, dirender besar mengikuti gaya label J&T/Shopee yang jadi
- * acuan — barcode adalah elemen paling dominan di resi, bukan pemanis. */
 function RealBarcode({ value }: { value: string }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -113,10 +85,6 @@ interface AreaBoxesProps {
   statusLabel: string;
 }
 
-/** Kotak wilayah tujuan (Kabupaten/Kota + Kecamatan), meniru pola
- * "KAB. SIDOARJO" / "BUDURAN" pada label J&T — hasil ekstraksi heuristik
- * dari teks alamat (lihat extractAreaLabels), fallback ke Jenis/Status
- * kalau alamatnya tidak cukup detail. */
 function AreaBoxes({ areaLabels, deliveryType, statusLabel }: AreaBoxesProps): React.JSX.Element {
   if (!areaLabels) {
     return (
@@ -225,9 +193,9 @@ export function ReceiptContent(): React.JSX.Element {
 
   return (
     <div className="min-h-screen bg-neutralBg pb-12">
-      {/* Bar navigasi — hilang saat dicetak */}
+
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-borderSoft bg-surface px-6 py-3 print:hidden">
-        <Link href={`/home/delivery/${delivery.id}`} className="flex items-center gap-1.5 text-sm text-textMuted hover:text-text">
+        <Link href={`/delivery/${delivery.id}`} className="flex items-center gap-1.5 text-sm text-textMuted hover:text-text">
           <ArrowLeft className="h-4 w-4" /> Kembali
         </Link>
         <p className="text-sm font-medium text-textMuted">Resi Pengiriman · {delivery.code}</p>
@@ -241,7 +209,7 @@ export function ReceiptContent(): React.JSX.Element {
       </div>
 
       <div className="mx-auto mt-6 w-full max-w-2xl rounded-lg border-2 border-text bg-surface p-6 shadow-card print:m-0 print:max-w-none print:border print:shadow-none">
-        {/* Kop: Perusahaan (kiri) + badge kurir mitra kalau cocok (kanan) */}
+
         <div className="flex items-center justify-between border-b-2 border-dashed border-text pb-3">
           <div className="flex items-center gap-2">
             <Package className="h-7 w-7 text-accentDark" />
@@ -258,8 +226,6 @@ export function ReceiptContent(): React.JSX.Element {
           </div>
         </div>
 
-        {/* No. Order + Tanggal + Jenis/Status (dipindah dari kotak besar,
-            digantikan kotak wilayah tujuan di bawah — lihat areaLabels) */}
         <div className="flex items-center justify-between border-b border-borderSoft py-3">
           <div>
             <p className="text-[9px] uppercase tracking-wide text-textMuted">Order ID</p>
@@ -279,7 +245,6 @@ export function ReceiptContent(): React.JSX.Element {
           </div>
         </div>
 
-        {/* Barcode BESAR — elemen paling dominan, mengikuti gaya label J&T */}
         <div className="flex flex-col items-center gap-1 border-b-2 border-dashed border-text py-6">
           <RealBarcode value={delivery.code} />
           <p className="mt-1 font-mono text-lg font-bold tracking-widest text-text">{delivery.code}</p>
@@ -288,10 +253,8 @@ export function ReceiptContent(): React.JSX.Element {
 
         <SenderReceiverBlock delivery={delivery} />
 
-        {/* Kotak wilayah tujuan — lihat komponen AreaBoxes di atas */}
         <AreaBoxes areaLabels={areaLabels} deliveryType={delivery.type} statusLabel={statusMeta.label} />
 
-        {/* Kurir / Berat / Jarak / Terkirim */}
         <div className="grid grid-cols-2 gap-4 border-b border-borderSoft py-5 sm:grid-cols-4">
           <div>
             <p className="text-[10px] uppercase tracking-wide text-textMuted">Kurir</p>
@@ -318,8 +281,6 @@ export function ReceiptContent(): React.JSX.Element {
 
         {delivery.items && delivery.items.length > 0 ? <ItemsTable items={delivery.items} /> : null}
 
-        {/* Titik koordinat — nama lokasi + lat/lng kalau tersedia (posisi
-            kurir terakhir/gudang asal), bukan cuma alamat teks. */}
         {hasCoord ? (
           <div className="flex items-center gap-2 border-b border-borderSoft py-4 text-xs text-textMuted">
             <MapPin className="h-3.5 w-3.5 shrink-0" />
@@ -329,7 +290,6 @@ export function ReceiptContent(): React.JSX.Element {
           </div>
         ) : null}
 
-        {/* Catatan */}
         {delivery.notes ? (
           <div className="border-b border-borderSoft py-5">
             <p className="mb-1 text-[10px] uppercase tracking-wide text-textMuted">Catatan</p>
@@ -339,7 +299,6 @@ export function ReceiptContent(): React.JSX.Element {
           </div>
         ) : null}
 
-        {/* Tanda tangan */}
         <div className="grid grid-cols-3 gap-6 pt-8 text-center text-xs text-textMuted">
           <div>
             <div className="mb-10 border-b border-text" />

@@ -1,5 +1,5 @@
-import { BarangMasukContent } from '@/component/gudang/BarangMasuk';
+import { redirect } from 'next/navigation';
 
-export default function Page(): React.JSX.Element {
-  return <BarangMasukContent />;
+export default function Page(): never {
+  redirect('/barang-masuk');
 }

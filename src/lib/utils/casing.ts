@@ -1,9 +1,4 @@
-/**
- * Backend gostock mengembalikan JSON dengan key snake_case (mis. `access_token`,
- * `role_name`) sesuai konvensi Go. Supaya kode TypeScript di frontend tetap
- * memakai konvensi camelCase yang wajar, seluruh response dikonversi otomatis
- * satu kali di sini — bukan di tiap pemanggilan endpoint.
- */
+
 
 function snakeToCamel(key: string): string {
   return key.replace(/_([a-z0-9])/g, (_, char: string) => char.toUpperCase());
@@ -31,7 +26,6 @@ function camelToSnake(key: string): string {
   return key.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`);
 }
 
-/** Kebalikannya — dipakai saat MENGIRIM payload ke backend (body request). */
 export function snakeizeKeysDeep<T>(input: unknown): T {
   if (Array.isArray(input)) {
     return input.map((item) => snakeizeKeysDeep(item)) as unknown as T;

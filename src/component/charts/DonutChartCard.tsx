@@ -12,7 +12,7 @@ interface DonutChartCardProps {
   data: DonutSegment[];
 }
 
-export function DonutChartCard({ title, subtitle, data }: DonutChartCardProps): React.JSX.Element {
+export function DonutChartCard({ title, subtitle, data }: Readonly<DonutChartCardProps>): React.JSX.Element {
   return (
     <Card className="flex flex-col gap-4">
       <div>

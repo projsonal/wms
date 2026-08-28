@@ -1,15 +1,10 @@
 import { motion } from 'framer-motion';
 
 interface LoadingDotsProps {
-  /** Kelas warna dot, ikut warna teks tombol secara default. */
+
   className?: string;
 }
 
-/**
- * Indikator loading 3 titik yang memantul bergantian — dipakai di dalam
- * tombol submit (Masuk, Daftar, dll) selagi request berjalan, alih-alih
- * spinner berputar.
- */
 export function LoadingDots({ className }: LoadingDotsProps): React.JSX.Element {
   return (
     <span className={className ?? 'flex items-center gap-1'} role="status" aria-label="Memproses...">

@@ -35,22 +35,12 @@ interface StatusAction {
 
 interface StatusDef {
   icon: LucideIcon;
-  color: string; // warna aksen ikon & badge kode
-  bg: string; // gradient/latar lembut di belakang ikon
+  color: string;
+  bg: string;
   title: string;
   defaultMessage: string;
 }
 
-/**
- * Definisi tampilan tiap kode status yang mungkin ditemui pengguna —
- * baik hasil navigasi Next.js sungguhan (404 lewat not-found.tsx, 500
- * lewat error.tsx) MAUPUN kode "logis" aplikasi yang tidak selalu
- * dikirim browser sebagai response HTTP asli (401/403 dari proxy/
- * RoleGuard, 502/503/504 dari kegagalan memanggil backend gostock — lihat
- * lib/api/client.ts). Semua dirender lewat satu layout konsisten
- * (StatusScreen di bawah) supaya pengalaman "halaman error" seragam di
- * seluruh aplikasi, bukan pesan polos berbeda-beda tiap tempat.
- */
 const STATUS_DEFS: Record<StatusCode, StatusDef> = {
   '400': {
     icon: Compass,
@@ -128,11 +118,9 @@ const STATUS_DEFS: Record<StatusCode, StatusDef> = {
 
 interface StatusScreenProps {
   code: StatusCode;
-  /** Override pesan default (mis. detail teknis dari error.tsx). */
+
   message?: string;
-  /** Tombol aksi tambahan/override — default-nya cuma "Kembali ke Halaman
-   * Utama". Diisi manual di tiap pemanggil kalau butuh tombol lain
-   * (mis. "Coba Lagi" di error.tsx pakai reset() dari Next.js). */
+
   actions?: StatusAction[];
 }
 

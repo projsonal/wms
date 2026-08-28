@@ -1,15 +1,5 @@
 'use client';
 
-/**
- * Infrastruktur i18n minimal untuk toggle Bahasa (Indonesia/English) di
- * Settings > Tampilan. Cakupan SENGAJA dibatasi ke layar-layar yang paling
- * sering dilihat (sidebar navigasi, dashboard, Settings sendiri) — bukan
- * seluruh aplikasi. Menambah cakupan tinggal menambah key baru di kedua
- * kamus (id/en) di bawah lalu memanggil `t('key.path')` di komponennya.
- *
- * Desain sengaja dictionary flat bertitik (bukan objek nested + typing
- * rumit) supaya gampang ditambah tanpa banyak boilerplate TypeScript.
- */
 import { usePreferences } from '@/component/preferences/PreferencesContext';
 
 const DICT = {
@@ -79,9 +69,6 @@ const DICT = {
 
 export type TranslationKey = keyof typeof DICT.id;
 
-/** Hook `t(key)` — mengembalikan teks sesuai `language` aktif dari
- * PreferencesContext. Fallback ke Bahasa Indonesia & ke key itu sendiri
- * kalau belum ada terjemahannya (supaya tidak pernah tampil blank). */
 export function useTranslations(): (key: TranslationKey) => string {
   const { language } = usePreferences();
   return (key: TranslationKey) => DICT[language]?.[key] ?? DICT.id[key] ?? key;

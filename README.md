@@ -3,13 +3,20 @@
 Frontend **Warehouse Management System (WMS)** untuk StokRSD. Dibangun
 dengan **Next.js 16 (App Router + Turbopack) + TypeScript + React 19 +
 Tailwind CSS v4**, terhubung ke backend Go
-**[github.com/projsonal/gostock](https://github.com/projsonal/gostock)**.
+**[github.com/projsonal/gowms](https://github.com/projsonal/gowms)**.
+
+> **Catatan soal dokumen ini:** bagian struktur folder & peta rute di bawah
+> sebelumnya tidak sinkron dengan kode sungguhan (nama komponen yang tidak
+> pernah ada, route group `(dashboard)` yang sudah diganti `(app)`, nama
+> repo backend yang salah, dst) — sudah diperbarui supaya benar-benar
+> mencerminkan struktur saat ini. Kalau menambah/menghapus halaman, tolong
+> perbarui juga tabel di bawah supaya tidak berulang jadi tidak sinkron lagi.
 
 ## Menjalankan proyek
 
 ```bash
 npm install
-cp .env.example .env.local   # sesuaikan NEXT_PUBLIC_API_BASE_URL ke backend gostock Anda
+cp .env.example .env.local   # sesuaikan NEXT_PUBLIC_API_BASE_URL ke backend gowms Anda
 npm run dev                  # http://localhost:3000
 ```
 
@@ -34,10 +41,10 @@ src/
 │   ├── layout.tsx              root layout + <AuthProvider>
 │   ├── page.tsx                  redirect "/" -> "/login"
 │   ├── login/page.tsx              wizard login (role -> kredensial -> 2FA)
-│   └── (dashboard)/                route group: semua halaman terproteksi
+│   └── (app)/                      route group: semua halaman terproteksi
 │       ├── layout.tsx                 Sidebar + RoleGuard, dipakai bersama
 │       ├── dashboard/page.tsx           pilih dashboard sesuai role
-│       ├── items/page.tsx                 dst — satu folder per URL
+│       ├── kelola-barang/page.tsx         dst — satu folder per URL
 │       └── ...                              (lihat daftar lengkap di bawah)
 │
 ├── component/                COMPONENT, dikelompokkan per tanggung jawab
@@ -52,16 +59,15 @@ src/
 │   │                                   super_admin.tsx, admin.tsx, karyawan.tsx
 │   │                                   (super_admin & admin berbagi logic lewat
 │   │                                   StaffDashboardBase.tsx, tidak duplikasi)
-│   ├── gudang/                         Kelola Barang, WMS, Manajemen Gudang,
-│   │                                     Inventaris, Barang Masuk/Keluar
-│   ├── pengiriman/                       Pickup & Dropoff, Monitoring
-│   │                                       Pengiriman, Detail Lokasi, Cetak Resi
-│   ├── laporan/                            ReportPageTemplate (dipakai 5 halaman
-│   │                                         laporan lewat props, bukan 5 komponen
-│   │                                         terpisah — supaya tidak duplikasi)
-│   └── content/                              modul lain: Purchase Order, Supplier,
-│                                                Manajemen User, Task Management,
-│                                                Settings, Analisa Data
+│   ├── gudang/                         Kelola Barang, Unit Barang (SN), Manajemen
+│   │                                     Gudang, Ringkasan Stok, Manajemen
+│   │                                     Inventaris, Barang Masuk/Keluar/Rusak
+│   ├── laporan/                            ReportPageTemplate (dipakai beberapa
+│   │                                         halaman laporan lewat props, bukan
+│   │                                         komponen terpisah per jenis laporan)
+│   └── content/                              modul lain: Manajemen User, Manajemen
+│                                                Aset Gudang, Tracking Aset, Task
+│                                                Management, Settings, Analisa Data
 │
 ├── auth/                     STATE LOGIN & HAK AKSES (lintas halaman)
 │   ├── AuthContext.tsx          siapa yang sedang login (React Context)
@@ -69,7 +75,7 @@ src/
 │   └── demo.ts                      mode pratinjau tanpa backend
 │
 ├── lib/                      LOGIC NON-KOMPONEN
-│   ├── api/                    komunikasi ke backend gostock
+│   ├── api/                    komunikasi ke backend gowms
 │   ├── hooks/                    custom React hooks (mis. useResourceList)
 │   ├── utils/                      fungsi murni (format tanggal/uang, status->badge)
 │   └── data/                         data contoh (fallback sebelum backend aktif)
@@ -83,38 +89,57 @@ src/
   menyentuh logic, dan sebaliknya.
 - Satu folder = satu tanggung jawab. Kalau bingung taruh file baru di mana,
   tanya: "ini elemen dasar (ui), kerangka halaman (layout), atau konten
-  modul spesifik (gudang/pengiriman/laporan/content)?"
-- Route group `(dashboard)` adalah fitur resmi Next.js App Router untuk
+  modul spesifik (gudang/laporan/content)?"
+- Route group `(app)` adalah fitur resmi Next.js App Router untuk
   memakai satu `layout.tsx` (Sidebar + proteksi login) di banyak halaman
   tanpa menambah segmen di URL — bukan halaman sungguhan.
 
 ## Peta lengkap halaman -> komponen
+
+Hanya rute yang benar-benar ditautkan di menu sidebar (lihat
+`src/auth/roles.ts`) yang dicantumkan sebagai baris aktif. Beberapa URL lama
+(`/warehouse`, `/items`, `/goods-in`, `/goods-out`, `/reports/goods-in`,
+`/reports/goods-out`) masih hidup tapi HANYA sebagai redirect ke rute
+kanoniknya — sengaja dipertahankan supaya bookmark/link lama tidak 404,
+bukan halaman terpisah yang perlu disinkronkan kontennya.
 
 | Route | Komponen | Folder |
 |---|---|---|
 | `/login` | `CaptchaGate` + `LoginWizard` (langkah-langkah di `component/auth`) | `app/login` |
 | `/register` | `CaptchaGate` + `RegisterWizard` (berbagi langkah dengan login) | `app/register` |
 | `/dashboard` | `SuperAdminDashboard` / `AdminDashboard` / `KaryawanDashboard` | `component/roles_dashboard` |
-| `/pickup-dropoff` | `PickupDropoffContent` | `component/pengiriman` |
-| `/delivery-monitoring` | `DeliveryMonitoringContent` | `component/pengiriman` |
-| `/delivery/[id]` | `DeliveryDetailContent` | `component/pengiriman` |
-| `/receipt/[id]` | `ReceiptContent` | `component/pengiriman` |
-| `/cod-monitoring` | `CodMonitoringContent` | `component/content` |
-| `/items` (Kelola Barang) | `ItemsManagementContent` | `component/gudang` |
-| `/warehouse` (WMS) | `WarehouseListContent` | `component/gudang` |
-| `/warehouse-management` | `WarehouseManagementContent` | `component/gudang` |
-| `/inventory` | `InventoryOverviewContent` | `component/gudang` |
-| `/inventory-management` | `InventoryManagementContent` | `component/gudang` |
-| `/goods-in`, `/goods-out` | `GoodsInContent`, `GoodsOutContent` | `component/gudang` |
-| `/purchase-order` | `PurchaseOrderContent` | `component/content` |
-| `/supplier` | `SupplierContent` | `component/content` |
-| `/data-analysis` | `DataAnalysisContent` | `component/content` |
-| `/user-management` *(Super Admin)* | `UserManagementContent` | `component/content` |
-| `/tasks` *(Super Admin)* | `TaskManagementContent` | `component/content` |
+| `/kelola-barang` | `ItemsManagementContent` | `component/gudang` |
+| `/unit-barang` | `BarangSerialContent` — cari/kelola unit fisik ber-nomor-seri (SN) | `component/gudang` |
+| `/barang-masuk` | `BarangMasukContent` | `component/gudang` |
+| `/barang-keluar` | `BarangKeluarContent` | `component/gudang` |
+| `/barang-rusak` | `BarangRusakContent` | `component/gudang` |
+| `/inventory` (Ringkasan Stok) | `InventoryOverviewContent` — agregat baca-saja | `component/gudang` |
+| `/inventory-management` (Manajemen Inventaris) *(Staff)* | `InventoryManagementContent` — sesi Stock Opname | `component/gudang` |
+| `/warehouse-management` (Manajemen Gudang) | `WarehouseListContent` | `component/gudang` |
+| `/aset-gudang` (Manajemen Aset Gudang) | `AsetGudangContent` | `component/content` |
+| `/tracking-aset` | `AssetTrackingMapContent` | `component/content` |
+| `/data-analysis` *(Staff)* | — | `component/content` |
+| `/user-management` *(Super Admin)* | — | `component/content` |
 | `/settings` | `SettingsContent` | `component/content` |
-| `/reports/*` (5 halaman) | `ReportPageTemplate` (via props) | `component/laporan` |
+| `/reports/inventory`, `/reports/barang-masuk`, `/reports/barang-keluar`, `/reports/returns`, `/reports/warehouse` *(Staff)* | `ReportPageTemplate` (via props) | `component/laporan` |
+| `/reports/rekap-data` *(Staff)* | `RekapDataContent` | `component/laporan` |
 
-## Integrasi Backend (`github.com/projsonal/gostock`)
+### Modul backend yang ada tapi TIDAK aktif di frontend
+
+Backend gowms punya controller/repo/model lengkap untuk **Purchase Order**,
+**Supplier**, **Pengiriman** (pickup/dropoff, tracking, resi), dan **COD** —
+tapi keempatnya sengaja **tidak ditautkan ke menu sidebar sama sekali** di
+frontend saat ini (lihat komentar di `src/lib/api/modules.ts` dekat
+`maintenanceApi`/`kategoriApi`: tipe & API call modul-modul ini "di-backup",
+bukan dihapus permanen). Kalau salah satu mau diaktifkan lagi: perlu (1)
+kembalikan tipe `Raw*`/API call yang sesuai di `lib/api`, (2) buat
+komponen halamannya di `component/`, (3) daftarkan route-nya di `app/(app)/`,
+(4) tambahkan link-nya di `NAV_GROUPS` (`src/auth/roles.ts`), dan (5)
+tambahkan baris permission yang sesuai di `PERMISSION_MODULES`
+(`src/lib/data/permission-modules.ts`) — kelimanya harus konsisten, bukan
+cuma menyalakan salah satu.
+
+## Integrasi Backend (`github.com/projsonal/gowms`)
 
 Modul autentikasi frontend ini ditulis dengan membaca langsung source code
 backend (`internal/controller/auth`, `internal/controller/security`,
@@ -151,9 +176,9 @@ Semua komunikasi ke backend ada di `src/lib/api/`:
 | `security.ts` | `POST /security/verify`, `/security/challenge` (gerbang anti-bot) + `GET /captcha` (captcha form register) |
 | `auth.ts` | `register`, `login`, `setupTwoFactor`, `confirmTwoFactorSetup`, `requestOtp` (WhatsApp), `verifyOtp`, `refresh`, `logout`, `me`, `listSessions`, `revokeSession` — 1:1 dengan `auth_controller.go` |
 | `account.ts` | `PATCH /users/me/password/request-otp` + `/confirm` — ganti password (perlu verifikasi OTP WhatsApp) |
-| `resource.ts` | Factory CRUD generik dipakai modul non-auth (items, warehouses, dst) |
-| `modules.ts` | Endpoint domain: `items`, `warehouses`, `suppliers`, `purchase-orders`, `deliveries`, `inventory`, `tasks`, `users`, `dashboard/summary` — **belum diverifikasi ke source Go**, sesuaikan bila field/path berbeda |
-| `reports.ts` | `GET /reports/:type` untuk 5 jenis laporan — **belum diverifikasi ke source Go** |
+| `resource.ts` | Factory CRUD generik dipakai modul non-auth (mis. Barang Masuk/Keluar) |
+| `mappers.ts` | Konversi bentuk `Raw*` (persis field backend) <-> tipe UI di `@/types` |
+| `modules.ts` | Endpoint domain nyata (sudah diverifikasi ke source Go, lihat peta di komentar atas file itu sendiri): `/barang`, `/barang-serial`, `/barang-masuk`, `/barang-keluar`, `/barang-rusak`, `/gudang`, `/stock-opname`, `/aset`, `/laporan`, `/users`, `/roles`, `/dashboard/*`, dst |
 
 Alur login lengkap ada di `src/app/login/page.tsx`, alur register di
 `src/app/register/page.tsx`. Keduanya berbagi komponen langkah di
@@ -161,11 +186,11 @@ Alur login lengkap ada di `src/app/login/page.tsx`, alur register di
 `RegisterStep`, `RoleSelectStep`, `TwoFactorSetupStep`, `OtpVerifyStep`,
 `VerifyResultStep`).
 
-### Menjalankan backend gostock untuk pengujian lokal
+### Menjalankan backend gowms untuk pengujian lokal
 
 ```bash
-git clone https://github.com/projsonal/gostock.git
-cd gostock
+git clone https://github.com/projsonal/gowms.git
+cd gowms
 cp .env.example .env   # kalau ada; kalau tidak, isi minimal APP_PORT, DB_*, JWT_*
 go run cmd/main.go     # default listen di :8080
 ```

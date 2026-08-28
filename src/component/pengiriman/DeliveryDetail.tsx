@@ -20,17 +20,12 @@ import { formatDate, formatNumber } from '@/lib/utils/format';
 import { DELIVERY_STATUS_META } from '@/lib/utils/status';
 import type { Delivery } from '@/types';
 
-/** Pusat peta default kalau belum ada koordinat sama sekali — kantor pusat
- * StokRSD (Bandung), sekadar titik awal yang masuk akal. */
 const FALLBACK_CENTER = { lat: -6.9147, lng: 107.6098 };
 
 function totalWeightGram(items: Delivery['items']): number {
   return (items ?? []).reduce((sum, it) => sum + (it.weightGram ?? 0) * it.qty, 0);
 }
 
-/** Sidebar "Daftar Pengiriman" — daftar semua pengiriman dengan pencarian,
- * dipakai memilih pengiriman lain tanpa harus kembali ke Monitoring
- * Pengiriman. Mengikuti pola sidebar pada referensi desain. */
 function DeliveryListSidebar({ activeId }: { activeId: string }): React.JSX.Element {
   const [search, setSearch] = useState('');
   const { data: result, isLoading } = useSWR('delivery-detail-sidebar', () => deliveriesApi.list({ pageSize: 50 }));
@@ -63,7 +58,7 @@ function DeliveryListSidebar({ activeId }: { activeId: string }): React.JSX.Elem
             return (
               <li key={row.id}>
                 <Link
-                  href={`/home/delivery/${row.id}`}
+                  href={`/delivery/${row.id}`}
                   className={`block rounded-md border p-3 text-xs transition-colors ${
                     isActive ? 'border-accentDark bg-accentSoft' : 'border-borderSoft hover:border-accent'
                   }`}
@@ -86,13 +81,7 @@ function DeliveryListSidebar({ activeId }: { activeId: string }): React.JSX.Elem
 
 function StatCards({ delivery, liveDistanceKm }: { delivery: Delivery; liveDistanceKm: number | null }): React.JSX.Element {
   const weight = totalWeightGram(delivery.items);
-  // Prioritaskan jarak hasil hitung rute jalan sungguhan (OSRM, lihat
-  // onRouteComputed di RouteTrackingMap) kalau sudah ada — itu angka yang
-  // benar-benar mengikuti jalan raya. delivery.distanceKm dari backend
-  // cuma dipakai sebagai fallback SEBELUM rute selesai dihitung (biasanya
-  // 0/belum terisi, itu sebabnya sebelumnya kartu ini selalu kelihatan
-  // "0 km" walau peta rute sudah tergambar — dua angka itu sebelumnya
-  // tidak pernah disambungkan satu sama lain).
+
   const distanceLabel = liveDistanceKm !== null ? liveDistanceKm.toFixed(1) : delivery.distanceKm;
   return (
     <div className="grid grid-cols-3 gap-3">
@@ -173,7 +162,7 @@ function ItemsAndActions({ delivery, onComplete, isCompleting }: ItemsAndActions
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Link href={`/home/receipt/${delivery.id}`}>
+        <Link href={`/receipt/${delivery.id}`}>
           <Button variant="secondary">
             <Printer className="mr-1.5 h-3.5 w-3.5" /> Cetak Resi
           </Button>
@@ -195,8 +184,7 @@ export function DeliveryDetailContent(): React.JSX.Element {
   const confirm = useConfirm();
   const isCourierRole = user?.role === 'karyawan';
   const [isCompleting, setIsCompleting] = useState(false);
-  // Diisi lewat callback onRouteComputed dari RouteTrackingMap begitu rute
-  // jalan sungguhan (OSRM) berhasil dihitung -- lihat catatan di StatCards.
+
   const [liveDistanceKm, setLiveDistanceKm] = useState<number | null>(null);
 
   const { data: delivery, isLoading, error, mutate } = useSWR(
@@ -260,7 +248,7 @@ export function DeliveryDetailContent(): React.JSX.Element {
               </p>
               <p className="text-xs text-textMuted">Jadwal: {formatDate(delivery.scheduledAt)}</p>
             </div>
-            <Button variant="secondary" onClick={() => router.push('/home/delivery-monitoring')}>
+            <Button variant="secondary" onClick={() => router.push('/delivery-monitoring')}>
               Lihat Semua Pengiriman
             </Button>
           </Card>

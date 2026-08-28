@@ -9,19 +9,13 @@ interface OtpVerifyStepProps {
   errorMessage?: string | null;
 }
 
-/**
- * Verifikasi 2FA login — HANYA metode TOTP (kode 6 digit dari Google
- * Authenticator, berubah tiap 30 detik). Metode fallback OTP lewat
- * WhatsApp sudah dihapus (tidak reliabel di produksi); satu-satunya cara
- * mengaktifkan 2FA tetap lewat Settings -> Keamanan -> Aktifkan 2FA.
- */
 export function OtpVerifyStep({
   otp,
   onOtpChange,
   onVerify,
   isSubmitting,
   errorMessage,
-}: OtpVerifyStepProps): React.JSX.Element {
+}: Readonly<OtpVerifyStepProps>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4 text-center">
       <div>

@@ -1,22 +1,14 @@
 import { jsPDF } from 'jspdf';
 import type { Delivery } from '@/types';
 
-const PAGE_MARGIN = 40; // pt
+const PAGE_MARGIN = 40;
 
-/**
- * Cetak resi pengiriman untuk satu jadwal Pickup/Dropoff — dipakai saat
- * barang perlu dikirim ke lokasi tujuan (mis. ditempel di paket / dibawa
- * kurir sebagai bukti serah terima). Beda dengan exportRowsToPdf/
- * printRowsToPdf (yang mencetak DAFTAR banyak baris jadi tabel rekap),
- * resi ini fokus ke SATU pengiriman dengan tata letak label pengiriman.
- */
 export function printResiPengiriman(delivery: Delivery, generatedBy?: string): void {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a5' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   let y = PAGE_MARGIN;
 
-  // --- Kop -----------------------------------------------------------
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(20, 20, 20);
@@ -30,7 +22,6 @@ export function printResiPengiriman(delivery: Delivery, generatedBy?: string): v
   doc.line(PAGE_MARGIN, y, pageWidth - PAGE_MARGIN, y);
   y += 26;
 
-  // --- Nomor resi besar ------------------------------------------------
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
   doc.setTextColor(180, 83, 9);
@@ -70,7 +61,6 @@ export function printResiPengiriman(delivery: Delivery, generatedBy?: string): v
     field('Catatan', delivery.notes);
   }
 
-  // --- Kotak tanda tangan serah terima --------------------------------
   y += 8;
   const boxWidth = (pageWidth - PAGE_MARGIN * 2 - 16) / 2;
   const boxTop = y;
@@ -84,7 +74,6 @@ export function printResiPengiriman(delivery: Delivery, generatedBy?: string): v
   doc.text('Diserahkan oleh (kurir)', PAGE_MARGIN + 6, boxTop + boxHeight - 8);
   doc.text('Diterima oleh (penerima)', PAGE_MARGIN + boxWidth + 22, boxTop + boxHeight - 8);
 
-  // --- Footer ----------------------------------------------------------
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(150, 150, 150);

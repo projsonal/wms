@@ -16,34 +16,20 @@ interface PendingExport<T> {
 }
 
 interface UseExportFormatResult {
-  /** Panggil ini alih-alih exportRowsToCsv langsung — buka dialog pilih
-   * format (PDF/Excel) alih-alih langsung mengekspor. */
+
   requestExport: <T>(
     rows: T[],
     columns: ExportColumn<T>[],
     filenameBase: string,
     pdf: Omit<PdfExportOptions, 'generatedBy'>,
   ) => void;
-  /** Render ini SEKALI di JSX halaman (mis. di dekat penutup return),
-   * sama seperti komponen Modal lain. */
+
   dialog: React.JSX.Element;
 }
 
-/**
- * Hook generik untuk tombol "Export": menampilkan pilihan format PDF/Excel
- * dulu sebelum benar-benar mengekspor. PDF mengikuti format baku rekap data
- * gudang WMS-RSD (kop, judul, penjelasan singkat, lalu tabel data ukuran
- * A4) — lihat export-pdf.ts. Excel jadi file .xlsx asli (bukan CSV).
- *
- * Menggantikan pemanggilan `exportRowsToCsv(...)` langsung; CSV tetap
- * tersedia di export-csv.ts untuk pemakaian lain kalau dibutuhkan.
- */
 export function useExportFormat(): UseExportFormatResult {
   const { user } = useAuth();
-  // any di sini disengaja (generic disimpan per-request, cukup type-safe
-  // di titik pemanggilan requestExport<T> — state cuma jembatan sampai
-  // pengguna klik salah satu pilihan format).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const [pending, setPending] = useState<PendingExport<any> | null>(null);
 
   function requestExport<T>(

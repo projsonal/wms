@@ -1,11 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { ExportColumn } from '@/lib/utils/export-csv';
 
-/**
- * Ekspor baris tabel apa pun ke file .xlsx asli (bukan CSV yang "dipaksa"
- * dibuka Excel) — kolom otomatis di-lebarkan mengikuti isi terpanjang
- * supaya tidak perlu resize manual saat dibuka.
- */
 export function exportRowsToExcel<T>(
   rows: T[],
   columns: ExportColumn<T>[],
@@ -17,9 +12,6 @@ export function exportRowsToExcel<T>(
 
   const worksheet = XLSX.utils.aoa_to_sheet([header, ...body]);
 
-  // Lebar kolom otomatis: ambil karakter terpanjang antara header & isi,
-  // dengan batas wajar (10–60 karakter) supaya tidak ada kolom super lebar
-  // gara-gara satu nilai outlier (mis. deskripsi panjang).
   worksheet['!cols'] = columns.map((col, i) => {
     const headerLen = col.header.length;
     const maxBodyLen = body.reduce((max, r) => Math.max(max, String(r[i] ?? '').length), 0);

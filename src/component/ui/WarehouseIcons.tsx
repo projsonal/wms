@@ -1,11 +1,5 @@
 import type { SVGProps } from 'react';
 
-/**
- * Ikon-ikon SVG ringan bertema pergudangan & inventaris (kotak, forklift,
- * pallet, rak, barcode) — dipakai di WelcomeTransition & WelcomeBanner
- * supaya tidak bergantung pada aset gambar eksternal.
- */
-
 export function BoxIcon(props: SVGProps<SVGSVGElement>): React.JSX.Element {
   return (
     <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>

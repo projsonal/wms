@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, Monitor } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { RoleGuard } from '@/component/layout/RoleGuard';
 import { Badge } from '@/component/ui/Badge';
@@ -19,27 +19,23 @@ import { useAuth } from '@/auth/AuthContext';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { PermissionMatrixCard } from '@/component/content/PermissionMatrixCard';
-import { usersApi, dashboardApi, assetsApi, type ManagedUserPayload } from '@/lib/api/modules';
+import { usersApi, assetsApi, type ManagedUserPayload } from '@/lib/api/modules';
 import { useResourceList } from '@/lib/hooks/useResourceList';
 import { HttpError } from '@/lib/api/client';
-import { listErrorMessage } from '@/lib/utils/errors';
+import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { PERMISSION_MODULES } from '@/lib/data/permission-modules';
 import { ROLE_LABEL } from '@/auth/roles';
 import { formatDate } from '@/lib/utils/format';
 import { ASSET_STATUS_META, JENIS_ASET_META } from '@/lib/utils/status';
-import type { ActivityItem } from '@/component/roles_dashboard/RecentActivityCard';
-import type { ManagedUser, UserRole } from '@/types';
+import type { ManagedUser, UserDeviceSession, UserRole } from '@/types';
 
-const EMPTY_FORM: ManagedUserPayload = { name: '', username: '', email: '', role: 'karyawan', password: '' };
+const EMPTY_FORM: ManagedUserPayload = { name: '', username: '', email: '', phoneNumber: '', role: 'karyawan', password: '' };
 
 const TOTAL_MODUL_TERDAFTAR = Object.values(PERMISSION_MODULES).reduce(
   (sum, mods) => sum + mods.length,
   0,
 );
 
-/** "Aset Terbaru" — REAL, memakai GET /aset (data yang sama dipakai
- * halaman Manajemen Aset Gudang), diurutkan dari yang terbaru ditambahkan
- * supaya perubahan lapangan terbaru tampil duluan. */
 function RecentAssetsCard(): React.JSX.Element {
   const { data: result, error } = useSWR('user-mgmt-recent-assets', () => assetsApi.list({ pageSize: 8 }), {
     revalidateOnFocus: false,
@@ -50,7 +46,7 @@ function RecentAssetsCard(): React.JSX.Element {
     if (error) {
       return (
         <p className="rounded-md border border-dashed border-borderSoft bg-neutralBg p-6 text-center text-xs text-textMuted">
-          Gagal memuat daftar aset.
+          Gagal memuat daftar aset, silakan coba lagi.
         </p>
       );
     }
@@ -90,15 +86,13 @@ function RecentAssetsCard(): React.JSX.Element {
     <Card className="flex flex-col gap-4">
       <div>
         <h2 className="text-base font-semibold text-text">Aset Terbaru</h2>
-        <p className="text-xs text-textMuted">Daftar aset gudang yang baru ditambahkan</p>
+        <p className="text-xs text-textMuted">Silakan Daftarkan aset barang ke gudang yang ingin ditambahkan</p>
       </div>
       {renderBody()}
     </Card>
   );
 }
 
-/** "Ringkasan Aset Gudang" — REAL, memakai GET /aset/summary. Menunjukkan
- * komposisi jumlah aset per jenis (tiang/odc/ont/odp/olt/transportasi). */
 function AssetSummaryCard(): React.JSX.Element {
   const { data: summary, error } = useSWR('user-mgmt-asset-summary', () => assetsApi.summary(), {
     revalidateOnFocus: false,
@@ -119,7 +113,7 @@ function AssetSummaryCard(): React.JSX.Element {
     if (summary.total === 0) {
       return (
         <p className="rounded-md border border-dashed border-borderSoft bg-neutralBg p-6 text-center text-xs text-textMuted">
-          Belum ada aset yang tercatat sama sekali.
+          Belum ada data aset barang yang tercatat sama sekali.
         </p>
       );
     }
@@ -166,74 +160,71 @@ function AssetSummaryCard(): React.JSX.Element {
 
 const ACTIVITY_DOT_COLOR = ['bg-infoText', 'bg-successText', 'bg-warningText', 'bg-dangerText'];
 
-/** "Monitoring User" — REAL, memakai endpoint /dashboard/activity yang
- * sama dengan kartu Aktivitas Terbaru di dashboard admin. */
-function MonitoringUserCard(): React.JSX.Element {
-  const [activity, setActivity] = useState<ActivityItem[] | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    dashboardApi
-      .activity()
-      .then(setActivity)
-      .catch(() => setError(true));
-  }, []);
-
-  function renderBody(): React.JSX.Element {
-    if (error) {
-      return (
-        <p className="rounded-md border border-dashed border-borderSoft bg-neutralBg p-6 text-center text-xs text-textMuted">
-          Gagal memuat log aktivitas.
-        </p>
-      );
-    }
-    if (activity === null) {
-      return <p className="text-xs text-textMuted">Memuat aktivitas...</p>;
-    }
-    if (activity.length === 0) {
-      return (
-        <p className="rounded-md border border-dashed border-borderSoft bg-neutralBg p-6 text-center text-xs text-textMuted">
-          Belum ada aktivitas tercatat.
-        </p>
-      );
-    }
-    return (
-      <ul className="flex flex-col gap-3 max-h-64 overflow-auto pr-1">
-        {activity.slice(0, 8).map((item, index) => (
-          <motion.li
-            key={item.id}
-            className="flex gap-2 text-sm"
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: index * 0.03 }}
-          >
-            <span
-              className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${ACTIVITY_DOT_COLOR[index % ACTIVITY_DOT_COLOR.length]}`}
-            />
-            <div>
-              <p className="text-text">{item.message}</p>
-              <p className="text-xs text-textMuted">{item.timeAgo}</p>
-            </div>
-          </motion.li>
-        ))}
-      </ul>
-    );
-  }
+function MonitoringUserCard({ rows }: Readonly<{ rows: ManagedUser[] }>): React.JSX.Element {
+  const online = rows.filter((r) => r.isOnline);
+  const recentLogins = [...rows]
+    .filter((r) => r.lastLogin)
+    .sort((a, b) => new Date(b.lastLogin ?? 0).getTime() - new Date(a.lastLogin ?? 0).getTime())
+    .slice(0, 6);
 
   return (
     <Card className="flex flex-col gap-4">
       <div>
         <h2 className="text-base font-semibold text-text">Monitoring User</h2>
-        <p className="text-xs text-textMuted">Log aktivitas real-time</p>
+        <p className="text-xs text-textMuted">Siapa yang online sekarang & login terakhir tiap user</p>
       </div>
-      {renderBody()}
+
+      <div>
+        <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-textMuted">
+          Sedang Online ({online.length})
+        </h3>
+        {online.length === 0 ? (
+          <p className="text-xs text-textMuted">Tidak ada user yang sedang login.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {online.map((u) => (
+              <li key={u.id} className="flex items-center gap-2 text-sm">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-successText" />
+                <span className="text-text">{u.name}</span>
+                <span className="text-xs text-textMuted">({ROLE_LABEL[u.role]})</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="border-t border-borderSoft pt-3">
+        <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-textMuted">Login Terakhir</h3>
+        {recentLogins.length === 0 ? (
+          <p className="text-xs text-textMuted">Belum ada riwayat login.</p>
+        ) : (
+          <ul className="flex max-h-64 flex-col gap-3 overflow-auto pr-1">
+            {recentLogins.map((u, index) => (
+              <motion.li
+                key={u.id}
+                className="flex items-center justify-between gap-2 text-sm"
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: index * 0.03 }}
+              >
+                <span className="flex items-center gap-2">
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${ACTIVITY_DOT_COLOR[index % ACTIVITY_DOT_COLOR.length]}`}
+                  />
+                  <span className="text-text">{u.name}</span>
+                </span>
+                <span className="text-xs text-textMuted">{u.lastLogin ? formatDate(u.lastLogin) : '-'}</span>
+              </motion.li>
+            ))}
+          </ul>
+        )}
+      </div>
     </Card>
   );
 }
 
 function UserManagementBody(): React.JSX.Element {
-  // refreshIntervalMs=15000 -> status login (kolom "Status") terlihat
-  // "real-time" tanpa perlu reload manual halaman.
+
   const { user } = useAuth();
   const { rows, isLoading, error, mutate } = useResourceList('users', usersApi, undefined, 15000);
   const { requestExport, dialog: exportDialog } = useExportFormat();
@@ -243,6 +234,139 @@ function UserManagementBody(): React.JSX.Element {
   const [isSaving, setIsSaving] = useState(false);
   const confirm = useConfirm();
 
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkDelete(selectedRows: ManagedUser[]): Promise<void> {
+    if (!isBulkMode || selectedRows.length === 0) {
+      toast('Silakan Aktifkan "Modify" terlebih dahulu untuk memilih salah satu data atau beberapa yang mau dinonaktifkan.');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Nonaktifkan User Terpilih',
+      message: `${selectedRows.length} akun terpilih akan dinonaktifkan dan tidak bisa login lagi (bukan dihapus permanen, riwayat transaksinya tetap tersimpan). Lanjutkan?`,
+      confirmLabel: 'Ya, Nonaktifkan',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await Promise.all(selectedRows.map((r) => usersApi.remove(r.id)));
+      toast.success(`${selectedRows.length} user berhasil dinonaktifkan.`);
+      setSelectedIds(new Set());
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'beberapa data gagal dinonaktifkan.'));
+    }
+  }
+
+  function handleBulkChange(selectedRows: ManagedUser[]): void {
+    if (!isBulkMode) {
+      toast('Silakan Aktifkan "Modify" terlebih dahulu untuk memilih salah satu data yang mau diubah.');
+      return;
+    }
+    if (selectedRows.length !== 1) {
+      toast('Silakan pilih salah SATU baris data untuk diubah.');
+      return;
+    }
+    openEditModal(selectedRows[0]);
+  }
+
+  const [devicesUser, setDevicesUser] = useState<ManagedUser | null>(null);
+  const [devices, setDevices] = useState<UserDeviceSession[] | null>(null);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
+
+  async function openDevicesModal(row: ManagedUser): Promise<void> {
+    setDevicesUser(row);
+    setDevices(null);
+    setIsLoadingDevices(true);
+    try {
+      const list = await usersApi.listSessions(row.id);
+      setDevices(list);
+    } catch (err) {
+      toast.error(err instanceof HttpError ? err.message : 'Gagal memuat daftar perangkat.');
+      setDevices([]);
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  }
+
+  async function handleRevokeSession(session: UserDeviceSession): Promise<void> {
+    if (!devicesUser) return;
+    const ok = await confirm({
+      title: 'Cabut Sesi',
+      message: `Paksa logout "${devicesUser.name}" dari perangkat ini (${session.browser ?? 'browser tidak diketahui'} / ${session.os ?? 'OS tidak diketahui'})?`,
+      confirmLabel: 'Ya, Cabut',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setRevokingSessionId(session.id);
+    try {
+      await usersApi.revokeSession(devicesUser.id, session.id);
+      toast.success('Sesi berhasil dicabut, perangkat kamu otomatis keluar.');
+      setDevices((prev) => (prev ?? []).filter((s) => s.id !== session.id));
+    } catch (err) {
+      toast.error(err instanceof HttpError ? err.message : 'Gagal mencabut sesi.');
+    } finally {
+      setRevokingSessionId(null);
+    }
+  }
+
+  function renderDevicesBody(): React.JSX.Element {
+    if (isLoadingDevices) {
+      return <p className="text-xs text-textMuted">Memuat daftar perangkat…</p>;
+    }
+    if (!devices || devices.length === 0) {
+      return (
+        <p className="text-xs text-textMuted">
+          Tidak ada sesi/perangkat yang aktif di akun ini, sedang tidak login di perangkat mana pun.
+        </p>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-2">
+        {devices.map((session) => (
+          <div
+            key={session.id}
+            className="flex items-center justify-between gap-3 rounded-md border border-borderSoft p-3"
+          >
+            <div className="flex flex-col">
+              <span className="text-sm font-medium text-text">
+                {session.browser ?? 'Browser tidak diketahui'}
+                {session.browserVersion ? ` ${session.browserVersion}` : ''}
+                {' · '}
+                {session.os ?? 'OS tidak diketahui'}
+                {session.osVersion ? ` ${session.osVersion}` : ''}
+              </span>
+              <span className="text-xs text-textMuted">
+                {session.deviceType ?? 'Perangkat tidak diketahui'}
+                {session.location ? ` · ${session.location}` : ''}
+                {session.ipAddress ? ` · ${session.ipAddress}` : ''}
+              </span>
+              <span className="text-xs text-textMuted">Login sejak {formatDate(session.createdAt)}</span>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => handleRevokeSession(session)}
+              loading={revokingSessionId === session.id}
+            >
+              Cabut
+            </Button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   function openCreateModal(): void {
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -251,7 +375,14 @@ function UserManagementBody(): React.JSX.Element {
 
   function openEditModal(row: ManagedUser): void {
     setEditingId(row.id);
-    setForm({ name: row.name, username: row.username, email: row.email, role: row.role, password: '' });
+    setForm({
+      name: row.name,
+      username: row.username,
+      email: row.email,
+      phoneNumber: row.phoneNumber ?? '',
+      role: row.role,
+      password: '',
+    });
     setIsModalOpen(true);
   }
 
@@ -300,19 +431,37 @@ function UserManagementBody(): React.JSX.Element {
     { header: 'Nama', accessor: (r: ManagedUser) => r.name },
     { header: 'Username', accessor: (r: ManagedUser) => r.username },
     { header: 'Email', accessor: (r: ManagedUser) => r.email },
+    { header: 'No. Telepon', accessor: (r: ManagedUser) => r.phoneNumber ?? '-' },
     { header: 'Role', accessor: (r: ManagedUser) => ROLE_LABEL[r.role] },
     { header: 'Status', accessor: (r: ManagedUser) => r.status },
   ];
   const USER_PDF_META = {
-    title: 'Rekap Data Gudang — Manajemen User',
-    subtitle: 'Manajemen / Manajemen User',
-    description: 'Daftar akun pengguna WMS-RSD beserta peran (role) dan status keaktifan masing-masing akun.',
+    title: 'Rekap Data Manajemen User',
+    subtitle: 'Manajemen User',
+    description: 'Pengumpulan data akun pengguna aplikasi WMS-RSD beserta peran dan status keaktifan masing-masing akun.',
   };
 
   const columns: DataTableColumn<ManagedUser>[] = [
+    ...(isBulkMode
+      ? [
+          {
+            key: 'select',
+            header: '',
+            render: (row: ManagedUser) => (
+              <input
+                type="checkbox"
+                checked={selectedIds.has(row.id)}
+                onChange={() => toggleSelected(row.id)}
+                className="h-4 w-4"
+              />
+            ),
+          } satisfies DataTableColumn<ManagedUser>,
+        ]
+      : []),
     { key: 'name', header: 'Nama', render: (row) => row.name },
     { key: 'username', header: 'Username', render: (row) => row.username },
     { key: 'email', header: 'Email', render: (row) => row.email },
+    { key: 'phone', header: 'No. Telepon', render: (row) => row.phoneNumber || '-' },
     { key: 'role', header: 'Role', render: (row) => ROLE_LABEL[row.role] },
     {
       key: 'status',
@@ -335,6 +484,14 @@ function UserManagementBody(): React.JSX.Element {
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => openDevicesModal(row)}
+            title="Lihat Perangkat"
+            className="rounded p-1 text-textMuted hover:bg-infoBg hover:text-infoText"
+          >
+            <Monitor className="h-3.5 w-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => openEditModal(row)}
@@ -382,7 +539,7 @@ function UserManagementBody(): React.JSX.Element {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <AssetSummaryCard />
-        <MonitoringUserCard />
+        <MonitoringUserCard rows={rows} />
       </div>
 
       <StatsRow
@@ -404,13 +561,18 @@ function UserManagementBody(): React.JSX.Element {
 
       <DataTable
         title="Daftar Pengguna Sistem"
-        description="Kelola akun dan hak akses pengguna WMS-RSD"
+        description={
+          isBulkMode
+            ? `Silakan aktifkan Mode Modify untuk memilih ${selectedIds.size} data per baris. Pilih data per baris lalu gunakan Change/Delete di atas.`
+            : 'Kelola akun dan hak akses pengguna WMS-RSD'
+        }
         columns={columns}
         rows={rows}
         getRowId={(row) => row.id}
         isLoading={isLoading}
         errorMessage={listErrorMessage(error)}
         onRowAction={(action) => {
+          const selectedRows = rows.filter((r) => selectedIds.has(r.id));
           if (action === 'add') openCreateModal();
           if (action === 'export') {
             requestExport(rows, USER_EXPORT_COLUMNS, 'daftar-user', USER_PDF_META);
@@ -418,6 +580,12 @@ function UserManagementBody(): React.JSX.Element {
           if (action === 'print') {
             printRowsToPdf(rows, USER_EXPORT_COLUMNS, { ...USER_PDF_META, generatedBy: user?.fullName });
           }
+          if (action === 'modify') {
+            setIsBulkMode((prev) => !prev);
+            setSelectedIds(new Set());
+          }
+          if (action === 'change') handleBulkChange(selectedRows);
+          if (action === 'delete') handleBulkDelete(selectedRows);
         }}
       />
 
@@ -453,6 +621,12 @@ function UserManagementBody(): React.JSX.Element {
           value={form.email ?? ''}
           onChange={(event) => setForm({ ...form, email: event.target.value })}
         />
+        <Input
+          label="No. Telepon"
+          placeholder="08xxxxxxx"
+          value={form.phoneNumber ?? ''}
+          onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })}
+        />
         <Select
           label="Role"
           value={form.role ?? 'karyawan'}
@@ -472,6 +646,24 @@ function UserManagementBody(): React.JSX.Element {
             onChange={(event) => setForm({ ...form, password: event.target.value })}
           />
         ) : null}
+      </Modal>
+
+      <Modal
+        isOpen={devicesUser !== null}
+        title={`Perangkat Login — ${devicesUser?.name ?? ''}`}
+        onClose={() => setDevicesUser(null)}
+        footer={
+          <Button variant="secondary" onClick={() => setDevicesUser(null)}>
+            Tutup
+          </Button>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-textMuted">
+            Daftar perangkat yang sedang login. Apabila kamu Cabut sesi maka akan otomatis keluar akun.
+          </p>
+          {renderDevicesBody()}
+        </div>
       </Modal>
       {exportDialog}
     </PageShell>

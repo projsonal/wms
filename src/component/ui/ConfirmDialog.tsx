@@ -9,9 +9,7 @@ interface ConfirmOptions {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** 'danger' dipakai untuk aksi merusak (hapus) — tombol konfirmasi merah.
-   * 'protect' dipakai untuk aksi kunci/buka-kunci data — tombol oranye/kuning.
-   * 'default' untuk konfirmasi netral lainnya. */
+
   variant?: 'danger' | 'protect' | 'default';
 }
 
@@ -46,13 +44,6 @@ const VARIANT_META = {
   },
 } as const;
 
-/**
- * Mount SEKALI di root layout (`app/layout.tsx`). Sesudah itu, komponen mana
- * pun cukup panggil `const ok = await useConfirm()('Judul', 'Pesan')` —
- * ganti semua `window.confirm(...)` bawaan browser (yang tampilannya beda-beda
- * tiap browser & tidak bisa distyle) dengan dialog Ya/Batal konsisten dengan
- * desain aplikasi.
- */
 export function ConfirmDialogProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [state, setState] = useState<ConfirmState | null>(null);
   const pendingRef = useRef<ConfirmState | null>(null);
@@ -111,7 +102,6 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }): Re
   );
 }
 
-/** `const confirm = useConfirm(); const ok = await confirm({ title, message });` */
 export function useConfirm(): (options: ConfirmOptions) => Promise<boolean> {
   const ctx = useContext(ConfirmContext);
   if (!ctx) {

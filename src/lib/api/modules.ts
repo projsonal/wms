@@ -1,62 +1,36 @@
 import { apiClient, uploadFile } from '@/lib/api/client';
 import { createResourceApi } from '@/lib/api/resource';
-import { mapAssetRaw, mapBarangRusakRaw, mapBarangToItem, mapItemToBarangPayload, mapStockOpnameToRecords, mapSupplierRaw, mapUserRaw } from '@/lib/api/mappers';
+import { mapAssetRaw, mapBarangRusakRaw, mapBarangSerialToUnit, mapBarangToItem, mapItemToBarangPayload, mapRingkasanStokRow, mapUserRaw, mapUserSessionRaw } from '@/lib/api/mappers';
 import type {
   RawAsset,
   RawBarang,
   RawBarangKeluar,
   RawBarangMasuk,
   RawBarangRusak,
+  RawBarangSerial,
   RawGudang,
-  RawRak,
-  RawPengiriman,
-  RawPurchaseOrder,
+  RawRingkasanStokRow,
   RawStockOpname,
-  RawSupplier,
   RawUser,
+  RawUserSession,
 } from '@/lib/api/raw-types';
 import type {
   Asset,
   BarangRusak,
+  BarangSerialUnit,
   Delivery,
-  InventoryRecord,
   Item,
   JenisAset,
   ManagedUser,
   PaginatedResult,
-  PurchaseOrder,
-  Supplier,
+  StokGudangRecord,
+  UserDeviceSession,
   UserRole,
   Warehouse,
 } from '@/types';
 import type { ListParams } from '@/lib/api/resource';
 import type { ActivityItem } from '@/component/roles_dashboard/RecentActivityCard';
 
-/**
- * ====================================================================
- * PETA ENDPOINT NYATA BACKEND GOSTOK (internal/routes/router.go)
- * ====================================================================
- * Base URL: NEXT_PUBLIC_API_BASE_URL (default http://localhost:8080/stockrsd)
- *
- *   /barang            Kelola Barang         (bukan /items)
- *   /gudang            Kelola Gudang & Rak   (bukan /warehouses)
- *   /supplier          Supplier              (bukan /suppliers)
- *   /purchase-order    Purchase Order        (bukan /purchase-orders)
- *   /barang-masuk      Barang Masuk (goods-in)
- *   /barang-keluar     Barang Keluar (goods-out)
- *   /stock-opname      Stok Opname / Inventaris (bukan /inventory)
- *   /pengiriman        Pengiriman            (bukan /deliveries)
- *   /aset              Manajemen Aset Gudang (tiang/odc/ont/odp/olt/transportasi)
- *   /barang-rusak      Barang Rusak (retur/rusak)
- *   /users             Manajemen User        (sudah benar)
- *   /roles             Role & Permission Matrix
- *   /dashboard/summary + /dashboard/trend + /dashboard/activity + ...
- * ====================================================================
- */
-
-// ---------------------------------------------------------------------------
-// Barang (Kelola Barang) — dipetakan penuh dari bahasa Indonesia ke tipe UI.
-// ---------------------------------------------------------------------------
 export const itemsApi = {
   list: async (params?: ListParams): Promise<PaginatedResult<Item>> => {
     const { data, meta } = await apiClient.getPaginated<RawBarang>(
@@ -74,74 +48,86 @@ export const itemsApi = {
   update: (id: string, payload: Partial<Item>) =>
     apiClient.put<RawBarang>(`/barang/${id}`, mapItemToBarangPayload(payload)),
   remove: (id: string) => apiClient.delete<void>(`/barang/${id}`),
-  /** PATCH /barang/:id/protect — khusus super_admin. */
+
   setProtected: (id: string, isProtected: boolean) =>
     apiClient.patch<RawBarang>(`/barang/${id}/protect`, { is_protected: isProtected }),
-  /** PATCH /barang/:id/approve — khusus super_admin, setujui pengajuan admin. */
+
   approve: (id: string) => apiClient.patch<RawBarang>(`/barang/${id}/approve`, {}),
-  /** PATCH /barang/:id/reject — khusus super_admin, tolak pengajuan admin + catatan alasan. */
+
   reject: (id: string, catatan: string) =>
     apiClient.patch<RawBarang>(`/barang/${id}/reject`, { catatan }),
-  /** GET /barang/summary -> { total_barang, stok_menipis, total_nilai_inventaris } */
+
+  delegasikan: (id: string, userId: string) =>
+    apiClient.patch<RawBarang>(`/barang/${id}/delegasikan`, { user_id: Number(userId) }),
+
   summary: () =>
     apiClient.get<{ totalBarang: number; stokMenipis: number; totalNilaiInventaris: number }>(
       '/barang/summary',
     ),
+
+  nextSku: (kategoriId?: string, tipe?: string, merek?: string, beratGram?: number) => {
+    const params = new URLSearchParams();
+    if (kategoriId) params.set('kategori_id', kategoriId);
+    if (tipe) params.set('tipe', tipe);
+    if (merek) params.set('merek', merek);
+    if (beratGram !== undefined) params.set('berat_gram', String(beratGram));
+    const qs = params.toString();
+    return apiClient.get<{ sku: string }>(`/barang/next-sku${qs ? `?${qs}` : ''}`);
+  },
+
+  checkSku: (sku: string, excludeId?: string) => {
+    const params = new URLSearchParams({ sku });
+    if (excludeId) params.set('exclude_id', excludeId);
+    return apiClient.get<{ available: boolean }>(`/barang/check-sku?${params.toString()}`);
+  },
 };
 
-// ---------------------------------------------------------------------------
-// Supplier — dipetakan penuh.
-// ---------------------------------------------------------------------------
-export const suppliersApi = {
-  list: async (params?: ListParams): Promise<PaginatedResult<Supplier>> => {
-    const { data, meta } = await apiClient.getPaginated<RawSupplier>(
-      `/supplier${buildQuery(params)}`,
-    );
+export const barangSerialApi = {
+  list: async (params?: ListParams & { barangId?: string; gudangId?: string; status?: string; barangMasukItemId?: string; barangKeluarItemId?: string }): Promise<PaginatedResult<BarangSerialUnit>> => {
+    const { barangId, gudangId, status, barangMasukItemId, barangKeluarItemId, ...listParams } = params ?? {};
+    const query = buildQuery(listParams);
+    const extra = [
+      barangId ? `barang_id=${barangId}` : '',
+      gudangId ? `gudang_id=${gudangId}` : '',
+      status ? `status=${status}` : '',
+      barangMasukItemId ? `barang_masuk_item_id=${barangMasukItemId}` : '',
+      barangKeluarItemId ? `barang_keluar_item_id=${barangKeluarItemId}` : '',
+    ].filter(Boolean).join('&');
+    const url = extra ? `/barang-serial${query}${query ? '&' : '?'}${extra}` : `/barang-serial${query}`;
+    const { data, meta } = await apiClient.getPaginated<RawBarangSerial>(url);
     return {
-      data: data.map(mapSupplierRaw),
+      data: data.map(mapBarangSerialToUnit),
       page: meta?.page ?? 1,
       pageSize: meta?.limit ?? data.length,
       total: meta?.totalItems ?? data.length,
     };
   },
-  getById: async (id: string): Promise<Supplier> =>
-    mapSupplierRaw(await apiClient.get<RawSupplier>(`/supplier/${id}`)),
-  create: (payload: Partial<Supplier>) =>
-    apiClient.post<RawSupplier>('/supplier', {
-      kode: payload.code || payload.name?.slice(0, 8).toUpperCase(),
-      nama: payload.name,
-      pic: payload.contactPerson,
-      telepon: payload.phone,
-      kerjasama_kurir: (payload.courierPartners ?? []).join(','),
-      alamat: payload.address,
-      npwp: payload.npwp,
-      catatan: payload.notes,
-    }),
-  update: (id: string, payload: Partial<Supplier>) =>
-    apiClient.put<RawSupplier>(`/supplier/${id}`, {
-      kode: payload.code,
-      nama: payload.name,
-      pic: payload.contactPerson,
-      telepon: payload.phone,
-      kerjasama_kurir: (payload.courierPartners ?? []).join(','),
-      alamat: payload.address,
-      npwp: payload.npwp,
-      catatan: payload.notes,
-    }),
-  remove: (id: string) => apiClient.delete<void>(`/supplier/${id}`),
-  /** PATCH /supplier/:id/protect — khusus super_admin. */
-  setProtected: (id: string, isProtected: boolean) =>
-    apiClient.patch<RawSupplier>(`/supplier/${id}/protect`, { is_protected: isProtected }),
+  getById: async (id: string): Promise<BarangSerialUnit> =>
+    mapBarangSerialToUnit(await apiClient.get<RawBarangSerial>(`/barang-serial/${id}`)),
+
+  create: async (payload: { barangId: string; gudangId: string; serialNumber: string; catatan?: string }): Promise<BarangSerialUnit> =>
+    mapBarangSerialToUnit(
+      await apiClient.post<RawBarangSerial>('/barang-serial', {
+        barang_id: Number(payload.barangId),
+        gudang_id: Number(payload.gudangId),
+        serial_number: payload.serialNumber,
+        catatan: payload.catatan ?? '',
+      }),
+    ),
+
+  cariBySerial: async (serialNumber: string): Promise<BarangSerialUnit> =>
+    mapBarangSerialToUnit(await apiClient.get<RawBarangSerial>(`/barang-serial/cari/${encodeURIComponent(serialNumber)}`)),
+
+  ringkasan: (barangId: string) =>
+    apiClient.get<{ barangId: number; tersedia: number; terpasang: number; rusak: number }>(
+      `/barang-serial/ringkasan/${barangId}`,
+    ),
+
+  updateStatus: (id: string, status: 'tersedia' | 'terpasang' | 'rusak', catatan?: string) =>
+    apiClient.patch<RawBarangSerial>(`/barang-serial/${id}/status`, { status, catatan: catatan ?? '' }),
+  remove: (id: string) => apiClient.delete<void>(`/barang-serial/${id}`),
 };
 
-// ---------------------------------------------------------------------------
-// Gudang (Warehouse) — usedCapacity & totalItems dihitung otomatis dari
-// SUM(Rak.Terisi) tiap gudang (lihat catatan panjang di RawGudang.raks,
-// raw-types.ts) — TANPA sensor IoT, murni dari angka yang sudah disesuaikan
-// otomatis oleh backend setiap dokumen Barang Masuk/Keluar/Stock Opname
-// diselesaikan. Hanya akurat untuk item yang di-assign ke rak spesifik saat
-// input dokumen; item tanpa rak_id tidak ikut terhitung di sini.
-// ---------------------------------------------------------------------------
 export const warehousesApi = {
   list: async (params?: ListParams): Promise<PaginatedResult<Warehouse>> => {
     const { data, meta } = await apiClient.getPaginated<RawGudang>(
@@ -149,16 +135,15 @@ export const warehousesApi = {
     );
     return {
       data: data.map((raw): Warehouse => {
-        const raks = raw.raks ?? [];
-        const usedFromRaks = raks.reduce((sum, r) => sum + (r.terisi ?? 0), 0);
         return {
           id: String(raw.id),
           name: raw.nama,
           code: raw.kode || '-',
           address: raw.alamat ?? '-',
           capacity: raw.kapasitas ?? 0,
-          usedCapacity: usedFromRaks,
-          totalItems: usedFromRaks,
+
+          usedCapacity: raw.unitTersedia ?? 0,
+          totalItems: raw.skuTersedia ?? 0,
           picName: raw.pic || '-',
           phone: raw.telepon || undefined,
           status: 'aktif',
@@ -196,274 +181,13 @@ export const warehousesApi = {
       longitude: payload.longitude ?? null,
     }),
   remove: (id: string) => apiClient.delete<void>(`/gudang/${id}`),
-  /** PATCH /gudang/:id/protect — khusus super_admin. */
+
   setProtected: (id: string, isProtected: boolean) =>
     apiClient.patch<RawGudang>(`/gudang/${id}/protect`, { is_protected: isProtected }),
 };
 
-// ---------------------------------------------------------------------------
-// Rak — penempatan fisik barang di dalam gudang (lihat model.Rak backend).
-// SENGAJA sederhana & manual (tanpa sensor/IoT): satu rak cuma py angka
-// "kapasitas" (dientry manual saat Tambah Rak) dan "terisi" (dihitung
-// backend dari SUM qty barang yang ditempatkan ke rak itu lewat proses
-// Barang Masuk/Keluar — lihat AdjustRakTerisi di backend, dipanggil
-// otomatis, BUKAN diisi manual dari sini). Status kosong/terisi_sebagian/
-// penuh dihitung otomatis dari dua angka itu (RecalculateStatus()).
-// ---------------------------------------------------------------------------
-export interface RakPayload {
-  kodeRak: string;
-  gudangId: number;
-  kapasitas: number;
-}
-
-export const rakApi = {
-  /** GET /gudang/rak?gudang_id=&page=&limit= */
-  list: async (gudangId: number, params?: ListParams): Promise<PaginatedResult<RawRak>> => {
-    const { data, meta } = await apiClient.getPaginated<RawRak>(
-      `/gudang/rak${buildQuery({ ...params, gudang_id: gudangId })}`,
-    );
-    return {
-      data,
-      page: meta?.page ?? 1,
-      pageSize: meta?.limit ?? data.length,
-      total: meta?.totalItems ?? data.length,
-    };
-  },
-  create: (payload: RakPayload) =>
-    apiClient.post<RawRak>('/gudang/rak', {
-      kode_rak: payload.kodeRak,
-      gudang_id: payload.gudangId,
-      kapasitas: payload.kapasitas,
-    }),
-  /** PUT /gudang/rak/:id — cuma kapasitas yang boleh diubah (kode rak &
-   * gudang bersifat tetap setelah dibuat; kalau salah, hapus & buat ulang). */
-  update: (id: number, kapasitas: number) =>
-    apiClient.put<RawRak>(`/gudang/rak/${id}`, { kapasitas }),
-  /** DELETE /gudang/rak/:id — backend menolak (409) kalau rak masih
-   * `terisi > 0`, jadi rak harus dikosongkan (barangnya dipindah/dikeluarkan
-   * dulu) sebelum bisa dihapus dari sini. */
-  remove: (id: number) => apiClient.delete<void>(`/gudang/rak/${id}`),
-};
-
-// ---------------------------------------------------------------------------
-// Purchase Order — status backend (draft/diajukan/disetujui/ditolak/
-// dibatalkan) BEDA kosakata dari status UI lama (draft/diproses/dikirim/
-// selesai/dibatalkan). Dipetakan ke status UI terdekat; sesuaikan lagi
-// kalau mau istilah asli backend yang tampil ke pengguna.
-// ---------------------------------------------------------------------------
-// PENTING: value di sini HARUS PERSIS sama dengan string yang backend
-// simpan (lihat pkg/constant/cons_po.go — berkapital "Draft"/"Diajukan"/
-// "Disetujui"/"Ditolak"/"Dibatalkan"). Sama seperti bug DELIVERY_STATUS_MAP
-// di bawah — key huruf kecil sebelumnya bikin status selain "Draft" gagal
-// ke-lookup dan diam-diam jatuh ke fallback 'draft'.
-const PO_STATUS_MAP: Record<RawPurchaseOrder['status'], PurchaseOrder['status']> = {
-  Draft: 'draft',
-  Diajukan: 'diproses',
-  Disetujui: 'dikirim',
-  Ditolak: 'dibatalkan',
-  Dibatalkan: 'dibatalkan',
-};
-
-export interface PurchaseOrderItemPayload {
-  barangId: number;
-  qtyPesan: number;
-  hargaSatuan: number;
-}
-
-export interface PurchaseOrderPayload {
-  supplierId: number;
-  tanggalPo: string; // YYYY-MM-DD
-  catatanPengajuan?: string;
-  items: PurchaseOrderItemPayload[];
-}
-
-export const purchaseOrdersApi = {
-  list: async (params?: ListParams): Promise<PaginatedResult<PurchaseOrder>> => {
-    const { data, meta } = await apiClient.getPaginated<RawPurchaseOrder>(
-      `/purchase-order${buildQuery(params)}`,
-    );
-    return {
-      data: data.map(
-        (raw): PurchaseOrder => ({
-          id: String(raw.id),
-          orderNumber: raw.nomorPo,
-          supplierId: String(raw.supplierId),
-          supplierName: raw.supplier?.nama ?? '-',
-          itemCount: raw.items?.length ?? 0,
-          totalAmount: raw.totalEstimasi,
-          orderDate: raw.tanggalPo,
-          expectedDate: raw.tanggalPo,
-          status: PO_STATUS_MAP[raw.status] ?? 'draft',
-          rawStatus: raw.status,
-          isProtected: raw.isProtected ?? false,
-        }),
-      ),
-      page: meta?.page ?? 1,
-      pageSize: meta?.limit ?? data.length,
-      total: meta?.totalItems ?? data.length,
-    };
-  },
-  getById: (id: string) => apiClient.get<RawPurchaseOrder>(`/purchase-order/${id}`),
-  create: (payload: PurchaseOrderPayload) => apiClient.post<RawPurchaseOrder>('/purchase-order', payload),
-  update: (id: string, payload: PurchaseOrderPayload) =>
-    apiClient.put<RawPurchaseOrder>(`/purchase-order/${id}`, payload),
-  remove: (id: string) => apiClient.delete<void>(`/purchase-order/${id}`),
-  /** PATCH /purchase-order/:id/ajukan — draft -> diajukan (menunggu approval). */
-  ajukan: (id: string) => apiClient.patch<RawPurchaseOrder>(`/purchase-order/${id}/ajukan`),
-  /** PATCH /purchase-order/:id/approval — khusus role dengan izin `approval_reject`. */
-  approve: (id: string, catatan?: string) =>
-    apiClient.patch<RawPurchaseOrder>(`/purchase-order/${id}/approval`, { setuju: true, catatan }),
-  reject: (id: string, catatan?: string) =>
-    apiClient.patch<RawPurchaseOrder>(`/purchase-order/${id}/approval`, { setuju: false, catatan }),
-  batalkan: (id: string) => apiClient.patch<RawPurchaseOrder>(`/purchase-order/${id}/batalkan`),
-  /** PATCH /purchase-order/:id/protect — khusus super_admin. */
-  setProtected: (id: string, isProtected: boolean) =>
-    apiClient.patch<RawPurchaseOrder>(`/purchase-order/${id}/protect`, { is_protected: isProtected }),
-};
-
-// ---------------------------------------------------------------------------
-// Pengiriman (Delivery) — status backend (draft/terjadwal/dikirim/terkirim/
-// dibatalkan) dipetakan ke DeliveryStatus UI (menunggu/dijemput/perjalanan/
-// terkirim/gagal); "gagal" tidak punya padanan asli di backend saat ini.
-// ---------------------------------------------------------------------------
-// PENTING: value di sini HARUS PERSIS sama dengan string yang backend
-// simpan (lihat pkg/constant/const_pengiriman.go — StatusPGDraft dkk
-// SENGAJA berkapital, "Draft"/"Dijadwalkan"/"Dalam Perjalanan", BUKAN
-// "draft"/"terjadwal"/"dikirim" huruf kecil seperti sebelumnya di sini).
-// Bug sebelumnya: key salah huruf besar/kecil membuat SEMUA status selain
-// "Draft" gagal ke-lookup dan diam-diam jatuh ke fallback 'menunggu' —
-// makanya status "Dalam Perjalanan" tidak pernah terbaca benar sama
-// sekali (termasuk bikin ping GPS kelihatan tidak berfungsi, padahal
-// pengirimannya memang belum pernah benar-benar berstatus itu di UI).
-const DELIVERY_STATUS_MAP: Record<RawPengiriman['status'], Delivery['status']> = {
-  Draft: 'menunggu',
-  Dijadwalkan: 'dijemput',
-  'Dalam Perjalanan': 'perjalanan',
-  Terkirim: 'terkirim',
-  Dibatalkan: 'gagal',
-};
-
-function mapPengiriman(raw: RawPengiriman): Delivery {
-  return {
-    id: String(raw.id),
-    code: raw.nomorPengiriman,
-    origin: raw.gudangAsal?.nama ?? '-',
-    originGudangId: raw.gudangAsalId,
-    originAddress: raw.gudangAsal?.alamat ?? undefined,
-    originPhone: raw.gudangAsal?.telepon ?? undefined,
-    originLatitude: raw.gudangAsal?.latitude ?? undefined,
-    originLongitude: raw.gudangAsal?.longitude ?? undefined,
-    // "Order ID" di resi = nomor dokumen Barang Keluar yang mendasari
-    // pengiriman ini (kalau ada) — itu yang secara bisnis disebut "order"
-    // yang sedang dipenuhi, bukan ID internal pengiriman itu sendiri.
-    orderId: raw.barangKeluar?.nomorPengeluaran ?? undefined,
-    items: raw.barangKeluar?.items?.map((it) => ({
-      sku: it.barang?.kodeBarang ?? '-',
-      name: it.barang?.nama ?? '-',
-      qty: it.qty,
-      unit: it.barang?.satuan?.singkatan ?? it.barang?.satuan?.nama ?? '',
-      weightGram: it.barang?.beratGram ?? undefined,
-    })),
-    destination: raw.alamatTujuan || raw.namaPenerima,
-    destLatitude: raw.destLat ?? undefined,
-    destLongitude: raw.destLng ?? undefined,
-    courierName: raw.namaKurir || '-',
-    distanceKm: 0,
-    status: DELIVERY_STATUS_MAP[raw.status] ?? 'menunggu',
-    type: raw.jenisPengambilan,
-    scheduledAt: raw.tanggalKirim,
-    deliveredAt: raw.waktuTerkirim ?? undefined,
-    latitude: raw.lastLat ?? undefined,
-    longitude: raw.lastLng ?? undefined,
-    receiverName: raw.namaPenerima,
-    receiverPhone: raw.teleponPenerima,
-    courierPhone: raw.teleponKurir,
-    notes: raw.catatan,
-    isProtected: raw.isProtected ?? false,
-  };
-}
-
-export interface DeliveryPayload {
-  gudangAsalId: number;
-  jenisPengambilan: 'pickup' | 'dropoff';
-  namaPenerima: string;
-  teleponPenerima?: string;
-  alamatTujuan?: string;
-  destLat?: number | null;
-  destLng?: number | null;
-  tanggalKirim: string; // YYYY-MM-DD
-  catatan?: string;
-}
-
-export const deliveriesApi = {
-  list: async (params?: ListParams): Promise<PaginatedResult<Delivery>> => {
-    const { data, meta } = await apiClient.getPaginated<RawPengiriman>(
-      `/pengiriman${buildQuery(params)}`,
-    );
-    return {
-      data: data.map(mapPengiriman),
-      page: meta?.page ?? 1,
-      pageSize: meta?.limit ?? data.length,
-      total: meta?.totalItems ?? data.length,
-    };
-  },
-  getById: async (id: string): Promise<Delivery> => mapPengiriman(await apiClient.get<RawPengiriman>(`/pengiriman/${id}`)),
-  create: (payload: DeliveryPayload) => apiClient.post<RawPengiriman>('/pengiriman', payload),
-  update: (id: string, payload: DeliveryPayload) => apiClient.put<RawPengiriman>(`/pengiriman/${id}`, payload),
-  remove: (id: string) => apiClient.delete<void>(`/pengiriman/${id}`),
-  /** PATCH /pengiriman/:id/jadwalkan — draft -> terjadwal, assign kurir.
-   * WAJIB dilakukan sebelum "mulai", dan "mulai" wajib sebelum ping GPS
-   * mulai diterima backend (lihat catatan panjang di komponen
-   * PickupDropoff.tsx soal kenapa ini penting untuk live tracking). */
-  jadwalkan: (id: string, payload: { namaKurir: string; teleponKurir?: string; estimasiTiba?: string }) =>
-    apiClient.patch<RawPengiriman>(`/pengiriman/${id}/jadwalkan`, payload),
-  /** PATCH /pengiriman/:id/mulai — terjadwal -> dalam_perjalanan. SETELAH
-   * ini statusnya baru "dalam_perjalanan" dan backend baru mau menerima
-   * ping GPS dari kurir (POST .../lokasi menolak selama status lain). */
-  mulai: (id: string) => apiClient.patch<RawPengiriman>(`/pengiriman/${id}/mulai`),
-  /** PATCH /pengiriman/:id/selesai — tandai pengiriman berhasil sampai
-   * tujuan (dijadwalkan/dikirim -> terkirim). */
-  complete: (id: string, catatan?: string) =>
-    apiClient.patch<RawPengiriman>(`/pengiriman/${id}/selesai`, { catatan }),
-  /** GET /pengiriman/:id/lokasi — posisi kurir terakhir (bukan /deliveries/:id/track).
-   * Backend mengirim field lastLat/lastLng/lastLocationAt (lihat
-   * `response` struct di LokasiTerkini, pengiriman_controller.go) — di-map
-   * ke {lat,lng,recordedAt} di sini SEBELUM dipakai pemanggil, supaya
-   * nama field yang salah tidak bikin polling GPS di LiveTrackingMap.tsx
-   * selalu gagal diam-diam (lat/lng lama-lama undefined, bukan null).
-   */
-  track: async (id: string): Promise<{ lat: number | null; lng: number | null; recordedAt: string | null }> => {
-    const raw = await apiClient.get<{ lastLat: number | null; lastLng: number | null; lastLocationAt: string | null }>(
-      `/pengiriman/${id}/lokasi`,
-    );
-    return { lat: raw.lastLat, lng: raw.lastLng, recordedAt: raw.lastLocationAt };
-  },
-  /** POST /pengiriman/:id/lokasi — ping posisi GPS real-time dari perangkat
-   * kurir (dipanggil berkala oleh ShareLocationButton via
-   * navigator.geolocation.watchPosition). */
-  sendLocation: (id: string, payload: { lat: number; lng: number; kecepatanKmh?: number }) =>
-    apiClient.post<unknown>(`/pengiriman/${id}/lokasi`, payload),
-  /** PATCH /pengiriman/:id/protect — khusus super_admin. */
-  setProtected: (id: string, isProtected: boolean) =>
-    apiClient.patch<RawPengiriman>(`/pengiriman/${id}/protect`, { is_protected: isProtected }),
-};
-
-// ---------------------------------------------------------------------------
-// Modul berikut path-nya SUDAH DIPERBAIKI ke endpoint backend yang benar,
-// tapi mapper field-nya BELUM ditulis (bentuk baris item bertingkat di
-// backang-masuk/keluar & stock-opname cukup berbeda dari tipe UI datar
-// yang ada sekarang) — perlu sesi lanjutan yang fokus ke modul ini secara
-// dedicated, sama seperti barang/supplier/po/pengiriman di atas.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Barang Masuk (Goods In) — REAL, /barang-masuk. Dokumen berbentuk header +
-// baris item (barang_id, qty, harga_satuan), dengan alur draft -> selesai
-// (stok & rak diperbarui otomatis oleh backend) atau draft -> dibatalkan.
-// Hanya dokumen berstatus draft yang boleh diubah/dihapus.
-// ---------------------------------------------------------------------------
 export interface GoodsItemPayload {
   barang_id: number;
-  rak_id?: number;
   qty: number;
   harga_satuan?: number;
 }
@@ -472,7 +196,7 @@ export interface GoodsInPayload {
   purchase_order_id?: number;
   supplier_id?: number;
   gudang_id: number;
-  tanggal: string; // YYYY-MM-DD
+  tanggal: string;
   catatan?: string;
   items: GoodsItemPayload[];
 }
@@ -485,19 +209,21 @@ export const goodsInApi = {
   create: goodsInResource.create,
   update: (id: string, payload: GoodsInPayload) => goodsInResource.update(id, payload),
   remove: goodsInResource.remove,
-  /** PATCH /barang-masuk/:id/selesai — selesaikan dokumen (stok & rak ikut diperbarui). */
-  complete: (id: string) => apiClient.patch<RawBarangMasuk>(`/barang-masuk/${id}/selesai`, {}),
-  /** PATCH /barang-masuk/:id/batalkan */
+
+  complete: (id: string, serialsByItemId?: Record<string, string[]>) =>
+    apiClient.patch<RawBarangMasuk>(`/barang-masuk/${id}/selesai`, {
+      items: Object.entries(serialsByItemId ?? {}).map(([barangMasukItemId, serialNumbers]) => ({
+        barang_masuk_item_id: Number(barangMasukItemId),
+        serial_numbers: serialNumbers,
+      })),
+    }),
+
   cancel: (id: string) => apiClient.patch<RawBarangMasuk>(`/barang-masuk/${id}/batalkan`, {}),
 };
 
-// ---------------------------------------------------------------------------
-// Barang Keluar (Goods Out) — REAL, /barang-keluar. Sama pola dengan Barang
-// Masuk tapi tanpa harga_satuan, dan wajib keperluan/penerima.
-// ---------------------------------------------------------------------------
 export interface GoodsOutPayload {
   gudang_id: number;
-  tanggal: string; // YYYY-MM-DD
+  tanggal: string;
   keperluan: string;
   penerima?: string;
   items: GoodsItemPayload[];
@@ -511,17 +237,18 @@ export const goodsOutApi = {
   create: goodsOutResource.create,
   update: (id: string, payload: GoodsOutPayload) => goodsOutResource.update(id, payload),
   remove: goodsOutResource.remove,
-  /** PATCH /barang-keluar/:id/selesai */
-  complete: (id: string) => apiClient.patch<RawBarangKeluar>(`/barang-keluar/${id}/selesai`, {}),
-  /** PATCH /barang-keluar/:id/batalkan */
+
+  complete: (id: string, serialsByItemId?: Record<string, string[]>) =>
+    apiClient.patch<RawBarangKeluar>(`/barang-keluar/${id}/selesai`, {
+      items: Object.entries(serialsByItemId ?? {}).map(([barangKeluarItemId, serialNumbers]) => ({
+        barang_keluar_item_id: Number(barangKeluarItemId),
+        serial_numbers: serialNumbers,
+      })),
+    }),
+
   cancel: (id: string) => apiClient.patch<RawBarangKeluar>(`/barang-keluar/${id}/batalkan`, {}),
 };
 
-/** Bentuk field asli /stock-opname (baris per opname, bukan per SKU
- * seperti tipe UI `InventoryRecord`) belum dipetakan — dityped ke
- * `InventoryRecord` supaya halaman existing tetap compile; data asli
- * kemungkinan perlu transformasi tambahan (agregasi per SKU) sebelum
- * sungguh cocok tampil di tabel ini. */
 export interface StockOpnameItemPayload {
   barangId: number;
   stokFisik: number;
@@ -530,30 +257,17 @@ export interface StockOpnameItemPayload {
 
 export interface StockOpnamePayload {
   gudangId: number;
-  tanggal: string; // YYYY-MM-DD
+  tanggal: string;
   catatan?: string;
   items: StockOpnameItemPayload[];
 }
 
-/** GET/POST/PUT/PATCH/DELETE /stock-opname — SEBELUMNYA generic pass-
- * through tanpa pemetaan field sama sekali (usersApi lama juga pernah
- * begini): backend mengembalikan DOKUMEN (banyak item per sesi), tapi
- * frontend mengharapkan baris flat per-SKU (`InventoryRecord`) DAN
- * "Sesuaikan Stok" mengirim `{quantity}` yang sama sekali tidak dikenali
- * backend. `list()` di bawah meratakan dokumen jadi baris per item;
- * create/update memakai bentuk dokumen asli. */
 export const inventoryApi = {
-  list: async (params?: ListParams): Promise<PaginatedResult<InventoryRecord>> => {
-    const { data, meta } = await apiClient.getPaginated<RawStockOpname>(
-      `/stock-opname${buildQuery({ ...params, pageSize: 100 })}`,
-    );
-    const flattened = data.flatMap(mapStockOpnameToRecords);
-    return {
-      data: flattened,
-      page: meta?.page ?? 1,
-      pageSize: flattened.length,
-      total: flattened.length,
-    };
+
+  ringkasanStok: async (): Promise<PaginatedResult<StokGudangRecord>> => {
+    const raw = await apiClient.get<RawRingkasanStokRow[]>('/barang/ringkasan-stok');
+    const mapped = raw.map(mapRingkasanStokRow);
+    return { data: mapped, page: 1, pageSize: mapped.length, total: mapped.length };
   },
   listSessions: async (params?: ListParams): Promise<PaginatedResult<RawStockOpname>> => {
     const { data, meta } = await apiClient.getPaginated<RawStockOpname>(
@@ -571,14 +285,13 @@ export const inventoryApi = {
   update: (id: string, payload: StockOpnamePayload) =>
     apiClient.put<RawStockOpname>(`/stock-opname/${id}`, payload),
   remove: (id: string) => apiClient.delete<void>(`/stock-opname/${id}`),
-  /** PATCH /stock-opname/:id/selesai — menerapkan selisih ke stok Barang. */
+
   complete: (id: string) => apiClient.patch<RawStockOpname>(`/stock-opname/${id}/selesai`),
+
+  cancel: (id: string) => apiClient.patch<RawStockOpname>(`/stock-opname/${id}/batalkan`),
   batalkan: (id: string) => apiClient.patch<RawStockOpname>(`/stock-opname/${id}/batalkan`),
 };
 
-/** GET/POST/PUT/PATCH/DELETE /aset — Manajemen Aset Gudang (lihat
- * internal/controller/asset). Label RSD / kode BA dibuat OTOMATIS oleh
- * server saat Create — TIDAK dikirim dari klien. */
 export interface AssetPayload {
   nama: string;
   jenisAset: JenisAset;
@@ -586,19 +299,14 @@ export interface AssetPayload {
   latitude?: number | null;
   longitude?: number | null;
   keterangan?: string;
-  ipAddress?: string;
-  /** Aset induk dalam hierarki jaringan FTTH (mis. ODP ini anak dari ODC mana). */
-  parentAssetId?: number | null;
-  /** Total slot port fisik (relevan untuk odc/odp/olt). */
-  jumlahPort?: number;
-}
+  merek?: string;
+  tipe?: string;
 
-export interface AssetPingResult {
-  id: number;
-  ipAddress: string;
-  pingStatus: 'online' | 'offline' | 'unknown';
-  lastPingAt?: string | null;
-  rttMs?: number;
+  parentAssetId?: number | null;
+
+  jumlahPort?: number;
+
+  barangId?: number | null;
 }
 
 export interface AssetMapPoint {
@@ -609,25 +317,24 @@ export interface AssetMapPoint {
   latitude: number;
   longitude: number;
   status: 'aktif' | 'rusak' | 'nonaktif';
-  ipAddress?: string;
-  pingStatus?: 'online' | 'offline' | 'unknown';
   gudangId: number;
   gudangNama: string;
   gudangKode: string;
-  /** "pusat" | "cabang" — dipakai membedakan warna/label marker kantor pusat vs cabang. */
+
   gudangTipe: 'pusat' | 'cabang';
-  /** Koordinat gudang pemilik (nil kalau gudang itu belum diisi koordinat)
-   * — dipakai menggambar garis "kabel" penghubung di halaman Tracking Aset. */
+
   gudangLatitude?: number | null;
   gudangLongitude?: number | null;
-  /** Aset induk hierarki jaringan (dipakai garis kabel yang benar, lihat
-   * AssetTrackingMap.tsx) — diprioritaskan dari gudangLatitude/Longitude
-   * kalau ada. */
+
   parentAssetId?: number | null;
   parentLatitude?: number | null;
   parentLongitude?: number | null;
   jumlahPort?: number;
   portTerisi?: number;
+
+  merek?: string;
+  tipe?: string;
+  kodeBarang?: string;
 }
 
 export const assetsApi = {
@@ -647,16 +354,10 @@ export const assetsApi = {
     ),
   create: (payload: AssetPayload) => apiClient.post<RawAsset>('/aset', payload),
   update: (id: string, payload: AssetPayload) => apiClient.put<RawAsset>(`/aset/${id}`, payload),
-  /** PATCH /aset/:id/status — menandai kondisi aset (aktif/rusak/nonaktif). */
+
   setStatus: (id: string, status: 'aktif' | 'rusak' | 'nonaktif') =>
     apiClient.patch<RawAsset>(`/aset/${id}/status`, { status }),
-  /** POST /aset/:id/ping — cek konektivitas satu aset yang punya ipAddress. */
-  ping: (id: string) => apiClient.post<AssetPingResult>(`/aset/${id}/ping`),
-  /** POST /aset/ping — cek konektivitas semua aset yang punya ipAddress. */
-  pingAll: () => apiClient.post<AssetPingResult[]>('/aset/ping'),
-  /** GET /aset/map — semua titik aset berkoordinat (tanpa paginasi), dipakai
-   * halaman Tracking Aset (peta). Filter opsional: jenisAset, gudangId,
-   * tipeGudang ('pusat'|'cabang'), status. */
+
   map: (params?: { jenisAset?: JenisAset; gudangId?: number; tipeGudang?: 'pusat' | 'cabang'; status?: string }) => {
     const q = new URLSearchParams();
     if (params?.jenisAset) q.set('jenis_aset', params.jenisAset);
@@ -669,11 +370,9 @@ export const assetsApi = {
   remove: (id: string) => apiClient.delete<void>(`/aset/${id}`),
 };
 
-/** Riwayat perubahan aset (audit trail) — inti "tracking" yang sebenarnya:
- * bukan cuma kondisi terkini, tapi apa yang berubah, kapan, siapa. */
 export interface AssetHistoryEntry {
   id: number;
-  eventType: 'dibuat' | 'status' | 'lokasi' | 'induk' | 'ping' | 'port';
+  eventType: 'dibuat' | 'status' | 'lokasi' | 'induk' | 'gudang' | 'port';
   fieldLama?: string;
   fieldBaru?: string;
   catatan?: string;
@@ -685,8 +384,6 @@ export const assetHistoryApi = {
   list: (assetId: string) => apiClient.get<AssetHistoryEntry[]>(`/aset/${assetId}/riwayat`),
 };
 
-/** Manajemen port perangkat jaringan (ODC/ODP/OLT) — meniru grid port di
- * panel detail referensi Fibero. Cuma relevan untuk aset dengan jumlahPort > 0. */
 export interface AssetPortItem {
   portNumber: number;
   status: 'kosong' | 'terisi';
@@ -700,8 +397,7 @@ export interface AssetPortItem {
 
 export const assetPortApi = {
   list: (assetId: string) => apiClient.get<AssetPortItem[]>(`/aset/${assetId}/port`),
-  /** Isi/ubah satu port — kirim SALAH SATU: childAssetId (sambung ke aset
-   * lain) ATAU customerName (sambung ke pelanggan), tidak keduanya. */
+
   set: (
     assetId: string,
     portNumber: number,
@@ -710,14 +406,12 @@ export const assetPortApi = {
   clear: (assetId: string, portNumber: number) => apiClient.delete<null>(`/aset/${assetId}/port/${portNumber}`),
 };
 
-/** GET/POST/PUT/PATCH/DELETE /barang-rusak — modul Barang Rusak (lihat
- * internal/controller/barang_rusak). Status selalu dibuat "pengecekan"
- * oleh server; gunakan `inspeksi()` untuk mengunci hasil pemeriksaan
- * fisik menjadi "retur" atau "rusak". */
 export interface BarangRusakPayload {
   barangId?: number | null;
   labelBarang: string;
   namaBarang: string;
+
+  serialNumber?: string;
   keterangan?: string;
 }
 
@@ -737,32 +431,22 @@ export const barangRusakApi = {
     apiClient.get<{ pengecekan: number; retur: number; rusak: number; total: number }>('/barang-rusak/summary'),
   create: (payload: BarangRusakPayload) => apiClient.post<RawBarangRusak>('/barang-rusak', payload),
   update: (id: string, payload: BarangRusakPayload) => apiClient.put<RawBarangRusak>(`/barang-rusak/${id}`, payload),
-  /** PATCH /barang-rusak/:id/inspeksi — hasil pengecekan fisik, HANYA
-   * super_admin & admin. Mengunci status jadi "retur" atau "rusak". */
+
   inspeksi: (id: string, jenisBarang: 'retur' | 'rusak') =>
     apiClient.patch<RawBarangRusak>(`/barang-rusak/${id}/inspeksi`, { jenis_barang: jenisBarang }),
-  /** POST /barang-rusak/:id/foto (multipart, field "foto") — foto bukti
-   * kondisi fisik barang rusak, maks. 2MB. */
+
   uploadFoto: (id: string, file: File) =>
     uploadFile<RawBarangRusak>(`/barang-rusak/${id}/foto`, file, 'foto'),
   remove: (id: string) => apiClient.delete<void>(`/barang-rusak/${id}`),
 };
 
-/** GET/POST/PUT/DELETE /users — Manajemen User (Super Admin).
- * Backend memakai nama field (`full_name`, `role_id`, `is_active`) yang
- * beda dari tipe UI `ManagedUser` (`name`, `role`, `status`) — perlu
- * mapping eksplisit (mapUserRaw), BUKAN generic createResourceApi
- * pass-through, supaya kolom Role/Status/Login Terakhir di tabel Manajemen
- * User tidak kosong lagi. Create juga wajib `role_id` (angka), jadi
- * resolveRoleId() menerjemahkan pilihan role di form ('admin', dst) lewat
- * daftar role sungguhan dari GET /roles.
- */
 export interface ManagedUserPayload {
   name: string;
   username: string;
   email: string;
+  phoneNumber?: string;
   role: UserRole;
-  /** Wajib diisi saat membuat user baru; diabaikan saat update. */
+
   password?: string;
 }
 
@@ -775,7 +459,7 @@ async function resolveRoleId(roleName: string): Promise<number> {
   }
   const id = cachedRoleIds[roleName];
   if (!id) {
-    // Cache mungkin basi (role baru dibuat setelah cache terisi) — muat ulang sekali.
+
     const roles = await rolesApi.list();
     cachedRoleIds = Object.fromEntries(roles.map((r) => [r.name, r.id]));
     return cachedRoleIds[roleName] ?? 0;
@@ -801,6 +485,7 @@ export const usersApi = {
       email: payload.email,
       password: payload.password,
       fullName: payload.name,
+      phoneNumber: payload.phoneNumber,
       roleId,
     });
     return mapUserRaw(raw);
@@ -810,15 +495,22 @@ export const usersApi = {
     const raw = await apiClient.put<RawUser>(`/users/${id}`, {
       email: payload.email,
       fullName: payload.name,
+      phoneNumber: payload.phoneNumber,
       roleId,
     });
     return mapUserRaw(raw);
   },
   remove: (id: string) => apiClient.delete<void>(`/users/${id}`),
+
+  listSessions: async (id: string): Promise<UserDeviceSession[]> => {
+    const res = await apiClient.get<{ sessions: RawUserSession[] }>(`/users/${id}/sessions`);
+    return res.sessions.map(mapUserSessionRaw);
+  },
+
+  revokeSession: (id: string, sessionId: string) =>
+    apiClient.delete<void>(`/users/${id}/sessions/${sessionId}`),
 };
 
-/** GET /maintenance/status (publik, tanpa auth — supaya user yang diblokir
- * tetap bisa lihat pesannya) & PUT /maintenance (khusus super_admin). */
 export interface MaintenanceStatus {
   isActive: boolean;
   message?: string;
@@ -833,55 +525,6 @@ export const maintenanceApi = {
     apiClient.put<MaintenanceStatus>('/maintenance', payload),
 };
 
-/** Bentuk asli model.CodTransaction (backend) setelah camelCase. */
-export type CodStatus = 'menunggu' | 'lunas' | 'bermasalah';
-export interface CodTransactionRaw {
-  id: number;
-  kode: string;
-  pelanggan: string;
-  nominal: number;
-  kurir: string;
-  tanggal: string;
-  status: CodStatus;
-  isProtected: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CodCreatePayload {
-  kode: string;
-  pelanggan: string;
-  nominal: number;
-  kurir: string;
-  tanggal: string; // YYYY-MM-DD
-  status: CodStatus;
-}
-
-export interface CodSummary {
-  total: number;
-  lunas: number;
-  menunggu: number;
-  bermasalah: number;
-  totalNominal: number;
-}
-
-const codResource = createResourceApi<CodTransactionRaw, CodCreatePayload>('/cod');
-
-export const codApi = {
-  list: codResource.list,
-  create: codResource.create,
-  update: (id: string, payload: CodCreatePayload) => codResource.update(id, payload),
-  remove: codResource.remove,
-  summary: () => apiClient.get<CodSummary>('/cod/summary'),
-  /** PATCH /cod/:id/protect — khusus super_admin (backend juga menggerbang ulang). */
-  setProtected: (id: string, isProtected: boolean) =>
-    apiClient.patch<CodTransactionRaw>(`/cod/${id}/protect`, { isProtected }),
-};
-
-// ---------------------------------------------------------------------------
-// Kategori — REAL, /gudang/kategori. Dipakai untuk dropdown filter kategori
-// di halaman Barang Masuk & Barang Keluar.
-// ---------------------------------------------------------------------------
 export interface KategoriRaw {
   id: number;
   nama: string;
@@ -895,10 +538,6 @@ export const kategoriApi = {
   create: async (nama: string): Promise<KategoriRaw> => apiClient.post<KategoriRaw>('/gudang/kategori', { nama }),
 };
 
-// ---------------------------------------------------------------------------
-// Satuan — REAL, /gudang/satuan. Dipakai untuk dropdown "Satuan" di form
-// Tambah/Ubah Barang (barang.satuan_id wajib diisi ID numerik oleh backend).
-// ---------------------------------------------------------------------------
 export interface SatuanRaw {
   id: number;
   nama: string;
@@ -914,8 +553,6 @@ export const satuanApi = {
     apiClient.post<SatuanRaw>('/gudang/satuan', { nama, singkatan }),
 };
 
-/** Satu baris matrix perizinan — 1:1 dengan ModulePermissionItem backend
- * (internal/controller/role/struct.go). */
 export interface PermissionMatrixItem {
   module: string;
   view: boolean;
@@ -926,7 +563,6 @@ export interface PermissionMatrixItem {
   assignDelegasi: boolean;
 }
 
-/** GET /roles + GET/PUT /roles/:id/permissions */
 export const rolesApi = {
   list: () => apiClient.get<Array<{ id: number; name: string }>>('/roles'),
   getPermissionMatrix: (id: number) =>
@@ -935,20 +571,12 @@ export const rolesApi = {
     apiClient.put<null>(`/roles/${id}/permissions`, { items }),
 };
 
-// ---------------------------------------------------------------------------
-// Dashboard — bentuk asli backend (internal/controller/dashboard/struct.go)
-// adalah ringkasan angka PER MODUL, bukan array StatMetric generik seperti
-// asumsi lama. /dashboard/trend juga endpoint TERPISAH dari /summary.
-// ---------------------------------------------------------------------------
 export interface DashboardSummaryRaw {
   kelolaBarang: { totalBarang: number; stokMenipis: number; totalNilaiInventaris: number };
-  gudang: { totalGudang: number; totalRak: number; rakPenuh: number; rakKosong: number };
-  supplier: { totalSupplier: number; supplierAktif: number };
-  purchaseOrder: { totalPo: number; menungguPersetujuan: number; disetujui: number };
+  gudang: { totalGudang: number };
   barangMasuk: { draft: number; selesai: number };
   barangKeluar: { draft: number; selesai: number };
   stockOpname: { draft: number; selesai: number };
-  pengiriman: { dalamPerjalanan: number; terkirim: number };
 }
 
 export interface DashboardTrendPointRaw {
@@ -957,7 +585,6 @@ export interface DashboardTrendPointRaw {
   keluar: number;
 }
 
-/** internal/controller/dashboard AnalisaResponse struct. */
 export interface AnalisaRaw {
   totalSku: number;
   totalRestockBulanIni: number;
@@ -972,9 +599,6 @@ export interface AnalisaRaw {
   asetPerGudang: Array<{ label: string; value: number }>;
 }
 
-/** GET /laporan/preview — dipakai ReportPageTemplate untuk menampilkan
- * data ASLI (bukan dummy) sebelum diunduh. Bentuk headers/rows generik
- * karena tiap tipe laporan kolomnya beda-beda (lihat backend buildReport). */
 export interface LaporanChartData {
   title: string;
   type: 'bar' | 'line';
@@ -991,8 +615,6 @@ export interface LaporanPreview {
   granularitas?: 'harian' | 'bulanan' | 'tahunan';
 }
 
-/** GET /app/version & GET /app/changelog — publik, tanpa perlu login.
- * Dipakai halaman /changelog dan VersionWatcher (cek update otomatis). */
 export interface AppVersionInfo {
   version: string;
   appName: string;
@@ -1009,16 +631,43 @@ export interface ChangelogEntry {
   };
 }
 
+export interface CheckUpdateInfo {
+  currentVersion: string;
+  latestVersion?: string;
+  updateAvailable: boolean;
+  releaseUrl?: string;
+  releaseNotes?: string;
+  publishedAt?: string;
+
+  selfUpdateEnabled: boolean;
+}
+
+export type SelfUpdateState = 'idle' | 'running' | 'success' | 'failed';
+
+export interface SelfUpdateStatus {
+  state: SelfUpdateState;
+  message: string;
+  fromVersion?: string;
+  toVersion?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  maintenanceAuto: boolean;
+  acknowledged: boolean;
+}
+
 export const appInfoApi = {
   version: () => apiClient.get<AppVersionInfo>('/app/version'),
   changelog: () => apiClient.get<ChangelogEntry[]>('/app/changelog'),
+
+  checkUpdate: () => apiClient.get<CheckUpdateInfo>('/app/check-update'),
+
+  updateStatus: () => apiClient.get<SelfUpdateStatus>('/app/update-status'),
+
+  triggerUpdate: () => apiClient.post<SelfUpdateStatus>('/app/update', {}),
 };
 
 export const laporanApi = {
-  /** GET /laporan/preview — `granularitas` (harian/bulanan/tahunan) HANYA
-   * relevan untuk laporan berbasis tanggal (Barang Keluar/Masuk/Retur/PO/
-   * Stock Opname); diabaikan backend untuk Laporan Stok Barang (chart-nya
-   * top 10 stok, bukan deret waktu — lihat internal/controller/laporan/chart.go). */
+
   preview: (tipe: string, dari?: string, sampai?: string, granularitas?: 'harian' | 'bulanan' | 'tahunan') => {
     const params = new URLSearchParams({ tipe });
     if (dari) params.set('dari', dari);
@@ -1029,11 +678,11 @@ export const laporanApi = {
 };
 
 export const dashboardApi = {
-  /** GET /dashboard/summary */
+
   summary: () => apiClient.get<DashboardSummaryRaw>('/dashboard/summary'),
-  /** GET /dashboard/trend — tren barang masuk/keluar 6 bulan terakhir */
+
   trend: () => apiClient.get<DashboardTrendPointRaw[]>('/dashboard/trend'),
-  /** GET /dashboard/activity */
+
   activity: async (): Promise<ActivityItem[]> => {
     const raw = await apiClient.get<
       Array<{ id: string; user: string; act: string; time: string; type: string }>
@@ -1044,7 +693,7 @@ export const dashboardApi = {
       timeAgo: item.time,
     }));
   },
-  /** GET /dashboard/analisa — dipakai halaman Analisa Data, semua angka REAL. */
+
   analisa: () => apiClient.get<AnalisaRaw>('/dashboard/analisa'),
 };
 
@@ -1061,11 +710,8 @@ function buildQuery(params: ListParams = {}): string {
   return query ? `?${query}` : '';
 }
 
-// Dipertahankan supaya kompatibel dengan kode lama yang import UserRole dari sini.
 export type { UserRole };
 
-/** GET/PATCH /notifications — ikon lonceng notifikasi di header, tampil di
- * SEMUA halaman untuk SEMUA role (lihat NotificationBell.tsx). */
 export interface AppNotification {
   id: number;
   type: string;
@@ -1089,15 +735,10 @@ export const notificationApi = {
   unreadCount: () => apiClient.get<{ unreadCount: number }>('/notifications/unread-count'),
   markRead: (id: number) => apiClient.patch<null>(`/notifications/${id}/read`),
   markAllRead: () => apiClient.patch<null>('/notifications/read-all'),
-  /** DELETE /notifications/:id — hapus dari daftar SAYA saja (lihat catatan
-   * di backend model.NotificationDismissed: notifikasi broadcast tetap
-   * tampil untuk user lain yang jadi target broadcast yang sama). */
+
   remove: (id: number) => apiClient.delete<null>(`/notifications/${id}`),
 };
 
-/** GET/POST/DELETE /trash — Tempat Sampah, ikon di header (HANYA
- * Super Admin & Admin, sesuai pembatasan backend). Mencakup 4 modul:
- * Aset Gudang, Barang, Gudang, Barang Rusak. */
 export interface TrashItem {
   type: 'aset' | 'barang' | 'gudang' | 'barang_rusak';
   id: number;
@@ -1112,4 +753,49 @@ export const trashApi = {
   restore: (type: TrashItem['type'], id: number) =>
     apiClient.post<null>(`/trash/${type}/${id}/restore`),
   purge: (type: TrashItem['type'], id: number) => apiClient.delete<null>(`/trash/${type}/${id}`),
+};
+
+/**
+ * NOTE (deliveries / "pengiriman"):
+ * No backend spec (Swagger/OpenAPI/sample response) was available for this module.
+ * The shape below — endpoint path `/pengiriman`, payload field names, and the extra
+ * action endpoints (jadwalkan/mulai/complete/protect/track/lokasi) — was inferred
+ * purely from how the pengiriman/* components already consume `deliveriesApi`.
+ * Verify the base path and payload keys against the actual backend and adjust if needed.
+ */
+export interface DeliveryPayload {
+  gudangAsalId: number;
+  jenisPengambilan: 'pickup' | 'dropoff';
+  namaPenerima: string;
+  teleponPenerima?: string;
+  alamatTujuan: string;
+  destLat?: number | null;
+  destLng?: number | null;
+  tanggalKirim: string;
+  catatan?: string;
+}
+
+export interface DeliveryTrackResult {
+  lat: number | null;
+  lng: number | null;
+  recordedAt: string | null;
+}
+
+export const deliveriesApi = {
+  ...createResourceApi<Delivery, DeliveryPayload>('/pengiriman'),
+
+  setProtected: (id: string, isProtected: boolean) =>
+    apiClient.patch<Delivery>(`/pengiriman/${id}/protect`, { is_protected: isProtected }),
+
+  jadwalkan: (id: string, payload: { namaKurir: string; teleponKurir?: string }) =>
+    apiClient.patch<Delivery>(`/pengiriman/${id}/jadwalkan`, payload),
+
+  mulai: (id: string) => apiClient.patch<Delivery>(`/pengiriman/${id}/mulai`, {}),
+
+  complete: (id: string) => apiClient.patch<Delivery>(`/pengiriman/${id}/complete`, {}),
+
+  track: (id: string) => apiClient.get<DeliveryTrackResult>(`/pengiriman/${id}/track`),
+
+  sendLocation: (id: string, payload: { lat: number; lng: number; kecepatanKmh?: number }) =>
+    apiClient.post<null>(`/pengiriman/${id}/lokasi`, payload),
 };

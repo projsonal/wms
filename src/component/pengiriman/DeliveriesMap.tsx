@@ -13,32 +13,16 @@ const Popup = dynamic(() => import('react-leaflet').then((m) => m.Popup), { ssr:
 
 interface DeliveriesMapProps {
   deliveries: Delivery[];
-  /** Titik gudang yang punya koordinat (latitude/longitude) — dipetakan
-   * dengan ikon terpisah dari marker kurir/pengiriman. Gudang tanpa
-   * koordinat (belum diisi lewat form Tambah/Ubah Gudang) tidak muncul. */
+
   warehouses?: Warehouse[];
-  /** Pusat peta default kalau belum ada satu pun delivery/gudang dengan koordinat. */
+
   fallbackCenter: { lat: number; lng: number };
 }
 
-/**
- * Peta Leaflet REAL (bukan placeholder statis) menampilkan:
- * 1. Titik lokasi setiap GUDANG yang sudah diisi koordinatnya (ikon gudang).
- * 2. Posisi terakhir setiap pengiriman aktif yang punya koordinat GPS
- *    (row.latitude/longitude — diisi dari ping terakhir ShareLocationButton
- *    lewat POST /pengiriman/:id/lokasi).
- * Dipakai di halaman Pickup & Dropoff supaya "Peta Pickup & Dropoff Aktif"
- * menunjukkan lokasi sungguhan, bukan titik persentase x/y statis.
- *
- * Dibungkus `relative z-0` supaya elemen internal Leaflet (yang punya
- * z-index sampai ~1000 lewat CSS bawaannya) tidak pernah bisa menembus ke
- * atas modal/dialog lain di halaman — itu membentuk stacking context baru
- * yang mengurung z-index Leaflet di dalam kotak peta ini saja.
- */
 export function DeliveriesMap({ deliveries, warehouses = [], fallbackCenter }: DeliveriesMapProps): React.JSX.Element {
   useEffect(() => {
     import('leaflet').then((L) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- properti internal Leaflet, tidak ada di typing publik
+
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',

@@ -1,9 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import useSWR from 'swr';
 import { toast } from 'sonner';
-import clsx from 'clsx';
-import { Pencil, Trash2, MapPin, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { Pencil, Trash2, MapPin } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
@@ -14,12 +14,12 @@ import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
 import { usePermissions } from '@/lib/hooks/usePermissions';
-import { assetsApi, warehousesApi, type AssetPayload } from '@/lib/api/modules';
+import { assetsApi, warehousesApi, itemsApi, type AssetPayload } from '@/lib/api/modules';
 import { useResourceList } from '@/lib/hooks/useResourceList';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
-import { ASSET_STATUS_META, JENIS_ASET_META, PING_STATUS_META } from '@/lib/utils/status';
+import { ASSET_STATUS_META, JENIS_ASET_META } from '@/lib/utils/status';
 import type { Asset, AssetStatus, JenisAset } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
@@ -60,6 +60,12 @@ function AsetGudangBody(): React.JSX.Element {
 
   const { rows, isLoading, error, mutate } = useResourceList('aset-gudang', assetsApi);
   const { rows: warehouses } = useResourceList('aset-gudang-warehouses', warehousesApi);
+  const { data: barangListRes } = useSWR('items-for-aset-gudang', () => itemsApi.list({ pageSize: 500 }));
+  const barangOptions = (barangListRes?.data ?? []).map((b) => {
+    const detail = [b.merek, b.tipe].filter(Boolean).join(' ');
+    const label = `${b.sku} — ${b.name}` + (detail ? ` (${detail})` : '');
+    return { label, value: b.id };
+  });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -92,9 +98,11 @@ function AsetGudangBody(): React.JSX.Element {
       latitude: row.latitude ?? null,
       longitude: row.longitude ?? null,
       keterangan: row.keterangan ?? '',
-      ipAddress: row.ipAddress ?? '',
+      merek: row.merek ?? '',
+      tipe: row.tipe ?? '',
       parentAssetId: row.parentAssetId ? Number(row.parentAssetId) : null,
       jumlahPort: row.jumlahPort ?? 0,
+      barangId: row.barangId ? Number(row.barangId) : null,
     });
     setIsModalOpen(true);
   }
@@ -117,9 +125,11 @@ function AsetGudangBody(): React.JSX.Element {
         latitude: punyaKoordinat(form.jenisAset) ? form.latitude ?? null : null,
         longitude: punyaKoordinat(form.jenisAset) ? form.longitude ?? null : null,
         keterangan: form.keterangan ?? '',
-        ipAddress: form.ipAddress?.trim() || undefined,
+        merek: form.merek?.trim() || undefined,
+        tipe: form.tipe?.trim() || undefined,
         parentAssetId: punyaKoordinat(form.jenisAset) ? form.parentAssetId ?? null : null,
         jumlahPort: punyaPort(form.jenisAset) ? form.jumlahPort ?? 0 : 0,
+        barangId: form.barangId ?? null,
       };
       if (editingId) {
         await assetsApi.update(editingId, payload);
@@ -164,42 +174,6 @@ function AsetGudangBody(): React.JSX.Element {
     }
   }
 
-  const [pingingId, setPingingId] = useState<string | null>(null);
-  const [isPingingAll, setIsPingingAll] = useState(false);
-
-  async function handlePing(row: Asset): Promise<void> {
-    if (!row.ipAddress) {
-      toast.error('Aset ini belum punya alamat IP — isi dulu lewat form Ubah Aset.');
-      return;
-    }
-    setPingingId(row.id);
-    try {
-      const res = await assetsApi.ping(row.id);
-      toast[res.pingStatus === 'online' ? 'success' : 'error'](
-        `${row.labelRsd ?? row.nama}: ${res.pingStatus === 'online' ? `Online (${res.rttMs ?? 0}ms)` : res.pingStatus === 'offline' ? 'Offline / tidak merespon' : 'Gagal dicek'}`,
-      );
-      await mutate();
-    } catch (err) {
-      toast.error(friendlyError(err, 'Gagal melakukan ping.'));
-    } finally {
-      setPingingId(null);
-    }
-  }
-
-  async function handlePingAll(): Promise<void> {
-    setIsPingingAll(true);
-    try {
-      const results = await assetsApi.pingAll();
-      const online = results.filter((r) => r.pingStatus === 'online').length;
-      toast.success(`Cek ping selesai: ${online}/${results.length} aset online.`);
-      await mutate();
-    } catch (err) {
-      toast.error(friendlyError(err, 'Gagal melakukan cek ping massal.'));
-    } finally {
-      setIsPingingAll(false);
-    }
-  }
-
   function toggleSelected(id: string): void {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -214,6 +188,9 @@ function AsetGudangBody(): React.JSX.Element {
     { header: 'Label/Kode', accessor: (r: Asset) => r.labelRsd ?? r.kodeBa ?? '-' },
     { header: 'Nama', accessor: (r: Asset) => r.nama },
     { header: 'Gudang', accessor: (r: Asset) => r.gudangNama },
+    { header: 'Merek', accessor: (r: Asset) => r.merek || '-' },
+    { header: 'Tipe', accessor: (r: Asset) => r.tipe || '-' },
+    { header: 'Kode Barang (SKU)', accessor: (r: Asset) => r.kodeBarang || '-' },
     { header: 'Latitude', accessor: (r: Asset) => (r.latitude !== null && r.latitude !== undefined ? String(r.latitude) : '-') },
     { header: 'Longitude', accessor: (r: Asset) => (r.longitude !== null && r.longitude !== undefined ? String(r.longitude) : '-') },
     { header: 'Status', accessor: (r: Asset) => r.status },
@@ -324,6 +301,9 @@ function AsetGudangBody(): React.JSX.Element {
       render: (row) => <span className="font-mono text-xs">{row.labelRsd ?? row.kodeBa ?? '-'}</span>,
     },
     { key: 'nama', header: 'Nama', render: (row) => row.nama },
+    { key: 'merek', header: 'Merek', render: (row) => row.merek || '-' },
+    { key: 'tipe', header: 'Tipe', render: (row) => row.tipe || '-' },
+    { key: 'kode-barang', header: 'Kode Barang (SKU)', render: (row) => <span className="font-mono text-xs">{row.kodeBarang || '-'}</span> },
     { key: 'gudang', header: 'Gudang', render: (row) => row.gudangNama },
     {
       key: 'koordinat',
@@ -359,40 +339,11 @@ function AsetGudangBody(): React.JSX.Element {
       },
     },
     {
-      key: 'ping',
-      header: 'Ping',
-      render: (row) => {
-        if (!row.ipAddress) return <span className="text-xs text-textMuted">-</span>;
-        const meta = PING_STATUS_META[row.pingStatus ?? 'unknown'];
-        return (
-          <span className="inline-flex items-center gap-1">
-            {row.pingStatus === 'online' ? (
-              <Wifi className="h-3 w-3 text-successText" />
-            ) : row.pingStatus === 'offline' ? (
-              <WifiOff className="h-3 w-3 text-dangerText" />
-            ) : null}
-            <Badge label={meta.label} variant={meta.variant} />
-          </span>
-        );
-      },
-    },
-    {
       key: 'row-actions',
       header: '',
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-2">
-          {row.ipAddress ? (
-            <button
-              type="button"
-              onClick={() => handlePing(row)}
-              disabled={pingingId === row.id}
-              title="Cek Ping"
-              className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark disabled:opacity-50"
-            >
-              <RefreshCw className={clsx('h-3.5 w-3.5', pingingId === row.id && 'animate-spin')} />
-            </button>
-          ) : null}
           <button
             type="button"
             onClick={() => openEditModal(row)}
@@ -428,11 +379,6 @@ function AsetGudangBody(): React.JSX.Element {
           { id: 'transportasi', label: 'Transportasi', value: summary.transportasi },
         ]}
       />
-      <div className="flex items-center justify-end">
-        <Button variant="secondary" onClick={handlePingAll} loading={isPingingAll}>
-          <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Cek Semua Ping
-        </Button>
-      </div>
       <DataTable
         title="Daftar Aset Gudang"
         description={
@@ -472,13 +418,21 @@ function AsetGudangBody(): React.JSX.Element {
           placeholder="mis. Tiang Jl. Merdeka No. 12"
         />
         <div className="grid grid-cols-2 gap-4">
-          <Select
-            label="Jenis Aset"
-            value={form.jenisAset ?? 'tiang'}
-            onChange={(event) => setForm({ ...form, jenisAset: event.target.value as JenisAset })}
-            options={JENIS_OPTIONS}
-            disabled={Boolean(editingId)}
-          />
+          <div>
+            <Select
+              label="Jenis Aset"
+              value={form.jenisAset ?? 'tiang'}
+              onChange={(event) => setForm({ ...form, jenisAset: event.target.value as JenisAset })}
+              options={JENIS_OPTIONS}
+              disabled={Boolean(editingId)}
+            />
+            {editingId ? (
+              <p className="mt-1 text-xs text-textMuted">
+                Tidak bisa diubah setelah dibuat (menentukan skema label & hierarki jaringan). Kalau
+                salah input, hapus lalu buat ulang.
+              </p>
+            ) : null}
+          </div>
           <Select
             label="Gudang"
             value={form.gudangId ? String(form.gudangId) : ''}
@@ -488,9 +442,13 @@ function AsetGudangBody(): React.JSX.Element {
               return { label: `${w.name}${kodeSuffix}`, value: String(w.id) };
             })}
             placeholder="Pilih gudang"
-            disabled={Boolean(editingId)}
           />
         </div>
+        {editingId && punyaKoordinat(form.jenisAset) ? (
+          <p className="-mt-2 text-xs text-textMuted">
+            Memindahkan aset ke gudang lain akan membuat ulang label RSD-nya mengikuti kode gudang tujuan.
+          </p>
+        ) : null}
         {punyaKoordinat(form.jenisAset) ? (
           <div className="grid grid-cols-2 gap-4">
             <Input
@@ -515,14 +473,6 @@ function AsetGudangBody(): React.JSX.Element {
             Transportasi tidak punya titik koordinat tetap — diberi kode BA (Barang Aset), bukan label RSD.
           </p>
         )}
-        {punyaKoordinat(form.jenisAset) ? (
-          <Input
-            label="Alamat IP (opsional)"
-            value={form.ipAddress ?? ''}
-            onChange={(event) => setForm({ ...form, ipAddress: event.target.value })}
-            placeholder="mis. 192.168.1.10 — isi untuk mengaktifkan fitur Cek Ping"
-          />
-        ) : null}
         {punyaKoordinat(form.jenisAset) ? (
           <Select
             label="Induk Jaringan (opsional)"
@@ -550,6 +500,27 @@ function AsetGudangBody(): React.JSX.Element {
             placeholder="mis. 8 — jumlah slot port fisik perangkat ini"
           />
         ) : null}
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="Merek (opsional)"
+            value={form.merek ?? ''}
+            onChange={(event) => setForm({ ...form, merek: event.target.value })}
+            placeholder="mis. Huawei"
+          />
+          <Input
+            label="Tipe (opsional)"
+            value={form.tipe ?? ''}
+            onChange={(event) => setForm({ ...form, tipe: event.target.value })}
+            placeholder="mis. MA5800-X7"
+          />
+        </div>
+        <Select
+          label="Kode Barang / SKU asal (opsional)"
+          value={form.barangId != null ? String(form.barangId) : ''}
+          onChange={(event) => setForm({ ...form, barangId: event.target.value === '' ? null : Number(event.target.value) })}
+          options={barangOptions}
+          placeholder="Tautkan ke SKU di Kelola Barang (kalau ada)"
+        />
         <Input
           label="Keterangan (opsional)"
           value={form.keterangan ?? ''}

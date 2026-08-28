@@ -3,13 +3,6 @@ export interface ExportColumn<T> {
   accessor: (row: T) => string | number;
 }
 
-/**
- * Ekspor baris tabel apa pun ke file .csv yang bisa dibuka Excel — dipakai
- * tombol "Export" di action bar tabel (pengganti "Insert" yang dulu
- * fungsinya sama persis dengan "Add", lihat TableRowActionBar.tsx).
- * BOM `\uFEFF` di depan supaya Excel Windows langsung mengenali UTF-8
- * (kalau tidak, karakter "é/ü" dsb bisa muncul rusak).
- */
 export function exportRowsToCsv<T>(rows: T[], columns: ExportColumn<T>[], filename: string): void {
   const escape = (value: string | number): string => `"${String(value ?? '').replace(/"/g, '""')}"`;
 

@@ -77,10 +77,6 @@ const Carousel = React.forwardRef((
       return
     }
 
-    // Sinkronisasi status embla-carousel API ke state React saat carousel
-    // pertama siap / berganti — pola standar "syncing with an external
-    // system", bukan reaksi berantai ke state React lain.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     onSelect(api)
     api.on("reInit", onSelect)
     api.on("select", onSelect)

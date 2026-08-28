@@ -8,6 +8,7 @@ import { AdminDashboard } from '@/component/roles_dashboard/admin';
 import { KaryawanDashboard } from '@/component/roles_dashboard/karyawan';
 import { WelcomeBanner } from '@/component/dashboard/WelcomeBanner';
 import { WelcomeTransition } from '@/component/auth/WelcomeTransition';
+import { showLoginGuide } from '@/component/system/LoginGuide';
 import { useAuth } from '@/auth/AuthContext';
 import { ROLE_LABEL } from '@/auth/roles';
 
@@ -24,9 +25,7 @@ export default function DashboardPage(): React.JSX.Element {
     }
     if (window.sessionStorage.getItem(WELCOME_FLAG_KEY) === '1') {
       window.sessionStorage.removeItem(WELCOME_FLAG_KEY);
-      // Flag one-time ini hanya dibaca sekali saat mount, bukan reaksi
-      // terhadap state React lain — aman dari risiko cascading render.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+
       setShowSplash(true);
     }
   }, []);
@@ -38,7 +37,11 @@ export default function DashboardPage(): React.JSX.Element {
           <WelcomeTransition
             name={user.fullName.split(' ')[0] ?? user.fullName}
             roleLabel={ROLE_LABEL[user.role]}
-            onDone={() => setShowSplash(false)}
+            onDone={() => {
+              setShowSplash(false);
+
+              showLoginGuide(user.role);
+            }}
           />
         ) : null}
       </AnimatePresence>

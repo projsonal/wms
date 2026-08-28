@@ -24,23 +24,236 @@ interface DataTableProps<T> {
   searchPlaceholder?: string;
   pageSize?: number;
   isLoading?: boolean;
-  /** Kalau diisi, ditampilkan sebagai baris pesan error (menggantikan
-   * "Tidak ada data yang cocok.") — dipakai saat fetch ke backend gagal,
-   * supaya beda jelas dari kondisi tabel yang memang kosong. */
+
   errorMessage?: string;
   toolbar?: ReactNode;
-  /** Dipanggil saat tombol Add/Change/Delete/Insert/Modify/Protect ditekan
-   * (toolbar ini hanya tampil untuk role super_admin/admin — lihat
-   * TableRowActionBar). Kalau tidak diisi, tombol tetap tampil tapi tidak
-   * melakukan apa-apa; pemanggil per halaman yang menentukan aksinya. */
+
   onRowAction?: (action: TableRowAction) => void;
-  /** Batasi tombol aksi yang muncul di toolbar (lihat TableRowActionBar).
-   * Kalau tidak diisi, semua aksi baku tampil seperti biasa. */
+
   visibleActions?: TableRowAction[];
-  /** Slug modul backend (mis. "kelola_barang") — kalau diisi, tombol
-   * Add/Change/Modify/Print mengikuti matrix perizinan role user yang
-   * login, bukan cuma role super_admin/admin. Lihat TableRowActionBar. */
+
   module?: string;
+
+  serverPagination?: ServerPaginationConfig;
+}
+
+export interface ServerPaginationConfig {
+  page: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  /** Jumlah baris per halaman saat ini (offset/limit) — dari dropdown limit. */
+  limit?: number;
+  /** Pilihan limit yang muncul di dropdown, mis. [10, 100, 200, 500]. */
+  limitOptions?: number[];
+  onLimitChange?: (limit: number) => void;
+  /** Total baris yang cocok filter (opsional, untuk teks info "x dari y data"). */
+  total?: number;
+}
+
+const PAGE_WINDOW = 2;
+
+/**
+ * Bangun daftar nomor halaman yang ditampilkan sebagai tombol, dibatasi
+ * jendela di sekitar halaman aktif + halaman pertama/terakhir, dengan "…"
+ * di antaranya. Ini mencegah render RATUSAN tombol saat totalPages besar
+ * (mis. 500 baris/halaman x banyak data), yang sebelumnya bikin UI lag.
+ */
+function buildPageWindow(current: number, total: number): (number | 'ellipsis')[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const pages = new Set<number>([1, total, current]);
+  for (let offset = 1; offset <= PAGE_WINDOW; offset += 1) {
+    if (current - offset >= 1) pages.add(current - offset);
+    if (current + offset <= total) pages.add(current + offset);
+  }
+  const sorted = Array.from(pages).sort((a, b) => a - b);
+  const result: (number | 'ellipsis')[] = [];
+  sorted.forEach((p, idx) => {
+    if (idx > 0 && p - sorted[idx - 1] > 1) {
+      result.push('ellipsis');
+    }
+    result.push(p);
+  });
+  return result;
+}
+
+function LimitSelect({ serverPagination }: Readonly<{ serverPagination: ServerPaginationConfig }>): React.JSX.Element | null {
+  if (!serverPagination.onLimitChange) {
+    return null;
+  }
+  const options = serverPagination.limitOptions ?? [10, 100, 200, 500];
+  return (
+    <label className="flex items-center gap-1.5 text-xs text-textMuted">
+      Tampilkan
+      <select
+        value={serverPagination.limit ?? options[0]}
+        onChange={(event) => serverPagination.onLimitChange?.(Number(event.target.value))}
+        aria-label="Jumlah data per halaman"
+        className="rounded-full border border-borderSoft bg-surfaceAlt px-3 py-1.5 text-xs font-semibold text-text outline-none focus:border-accent"
+      >
+        {options.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt} data
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function PageNumberButtons({
+  currentPage,
+  totalPages,
+  tableTitle,
+  goToPage,
+}: Readonly<{
+  currentPage: number;
+  totalPages: number;
+  tableTitle: string;
+  goToPage: (page: number) => void;
+}>): React.JSX.Element {
+  return (
+    <>
+      {buildPageWindow(currentPage, totalPages).map((pageNumber, idx) =>
+        pageNumber === 'ellipsis' ? (
+          <span
+            key={`ellipsis-${idx}`}
+            className="flex h-8 w-8 items-center justify-center text-sm text-textMuted"
+          >
+            …
+          </span>
+        ) : (
+          <motion.button
+            key={pageNumber}
+            type="button"
+            onClick={() => goToPage(pageNumber)}
+            aria-current={pageNumber === currentPage}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.92 }}
+            className="relative flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold text-textMuted transition-colors hover:bg-surfaceAlt"
+          >
+            {pageNumber === currentPage ? (
+              <motion.span
+                layoutId={`${tableTitle}-page-pill`}
+                className="absolute inset-0 rounded-full bg-accent"
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              />
+            ) : null}
+            <span className={`relative z-10 ${pageNumber === currentPage ? 'text-white' : ''}`}>
+              {pageNumber}
+            </span>
+          </motion.button>
+        ),
+      )}
+    </>
+  );
+}
+
+function CompactPager({
+  currentPage,
+  totalPages,
+  goToPage,
+}: Readonly<{ currentPage: number; totalPages: number; goToPage: (page: number) => void }>): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-1 rounded-full border border-borderSoft bg-surfaceAlt p-1">
+      <motion.button
+        type="button"
+        onClick={() => goToPage(currentPage - 1)}
+        disabled={currentPage === 1}
+        aria-label="Halaman sebelumnya"
+        whileHover={currentPage === 1 ? undefined : { scale: 1.15, x: -2 }}
+        whileTap={currentPage === 1 ? undefined : { scale: 0.88 }}
+        className="flex h-7 w-7 items-center justify-center rounded-full text-textMuted transition-colors hover:bg-surface disabled:opacity-30"
+      >
+        ‹
+      </motion.button>
+      <span className="min-w-[2.5rem] text-center text-xs font-semibold text-textMuted">
+        {currentPage}/{totalPages}
+      </span>
+      <motion.button
+        type="button"
+        onClick={() => goToPage(currentPage + 1)}
+        disabled={currentPage === totalPages}
+        aria-label="Halaman berikutnya"
+        whileHover={currentPage === totalPages ? undefined : { scale: 1.15, x: 2 }}
+        whileTap={currentPage === totalPages ? undefined : { scale: 0.88 }}
+        className="flex h-7 w-7 items-center justify-center rounded-full text-textMuted transition-colors hover:bg-surface disabled:opacity-30"
+      >
+        ›
+      </motion.button>
+    </div>
+  );
+}
+
+function DataTableBody<T>({
+  columns,
+  pagedRows,
+  getRowId,
+  isLoading,
+  errorMessage,
+  currentPage,
+  rowsPerPage,
+}: Readonly<{
+  columns: DataTableColumn<T>[];
+  pagedRows: T[];
+  getRowId: (row: T) => string;
+  isLoading: boolean;
+  errorMessage?: string;
+  currentPage: number;
+  rowsPerPage: number;
+}>): React.JSX.Element {
+  if (isLoading) {
+    return (
+      <tr>
+        <td colSpan={columns.length + 1} className="py-8 text-center text-textMuted">
+          Memuat data...
+        </td>
+      </tr>
+    );
+  }
+  if (errorMessage) {
+    return (
+      <tr>
+        <td colSpan={columns.length + 1} className="py-8 text-center text-dangerText">
+          {errorMessage}
+        </td>
+      </tr>
+    );
+  }
+  if (pagedRows.length === 0) {
+    return (
+      <tr>
+        <td colSpan={columns.length + 1} className="py-8 text-center text-textMuted">
+          Tidak ada data yang cocok.
+        </td>
+      </tr>
+    );
+  }
+  return (
+    <AnimatePresence initial={false} mode="popLayout">
+      {pagedRows.map((row, index) => (
+        <motion.tr
+          key={getRowId(row)}
+          layout
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25, delay: index * 0.03 }}
+          className="border-b border-borderSoft transition-colors last:border-0 hover:bg-surfaceAlt"
+        >
+          <td className="py-3 pr-4 text-center text-textMuted">
+            {(currentPage - 1) * rowsPerPage + index + 1}
+          </td>
+          {columns.map((column) => (
+            <td key={column.key} className={`py-3 pr-4 text-text ${alignClass(column.align)}`}>
+              {column.render(row)}
+            </td>
+          ))}
+        </motion.tr>
+      ))}
+    </AnimatePresence>
+  );
 }
 
 function matchesSearch<T>(row: T, term: string): boolean {
@@ -75,21 +288,31 @@ export function DataTable<T>({
   onRowAction,
   visibleActions,
   module,
+  serverPagination,
 }: DataTableProps<T>): React.JSX.Element {
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [clientPage, setClientPage] = useState(1);
 
   const filteredRows = useMemo(() => {
+    if (serverPagination) return rows;
     return rows.filter((row) => matchesSearch(row, search));
-  }, [rows, search]);
+  }, [rows, search, serverPagination]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const pagedRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = serverPagination ? Math.max(1, serverPagination.totalPages) : Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPage = serverPagination ? serverPagination.page : Math.min(clientPage, totalPages);
+  const pagedRows = serverPagination ? filteredRows : filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  function goToPage(next: number): void {
+    if (serverPagination) {
+      serverPagination.onPageChange(Math.min(totalPages, Math.max(1, next)));
+    } else {
+      setClientPage(Math.min(totalPages, Math.max(1, next)));
+    }
+  }
 
   function handleSearchChange(value: string): void {
     setSearch(value);
-    setPage(1);
+    setClientPage(1);
   }
 
   return (
@@ -101,48 +324,22 @@ export function DataTable<T>({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {toolbar}
-          <div className="relative w-full sm:w-56">
-            <input
-              value={search}
-              onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder={searchPlaceholder}
-              aria-label={searchPlaceholder}
-              className="w-full rounded-full border border-borderSoft bg-surfaceAlt px-4 py-2 text-sm outline-none focus:border-accent"
-            />
-          </div>
-          <div className="flex items-center gap-1 rounded-full border border-borderSoft bg-surfaceAlt p-1">
-            <motion.button
-              type="button"
-              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-              disabled={currentPage === 1}
-              aria-label="Halaman sebelumnya"
-              whileHover={currentPage === 1 ? undefined : { scale: 1.15, x: -2 }}
-              whileTap={currentPage === 1 ? undefined : { scale: 0.88 }}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-textMuted transition-colors hover:bg-surface disabled:opacity-30"
-            >
-              ‹
-            </motion.button>
-            <span className="min-w-[2.5rem] text-center text-xs font-semibold text-textMuted">
-              {currentPage}/{totalPages}
-            </span>
-            <motion.button
-              type="button"
-              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-              disabled={currentPage === totalPages}
-              aria-label="Halaman berikutnya"
-              whileHover={currentPage === totalPages ? undefined : { scale: 1.15, x: 2 }}
-              whileTap={currentPage === totalPages ? undefined : { scale: 0.88 }}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-textMuted transition-colors hover:bg-surface disabled:opacity-30"
-            >
-              ›
-            </motion.button>
-          </div>
+          {serverPagination ? <LimitSelect serverPagination={serverPagination} /> : null}
+          {serverPagination ? null : (
+            <div className="relative w-full sm:w-56">
+              <input
+                value={search}
+                onChange={(event) => handleSearchChange(event.target.value)}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
+                className="w-full rounded-full border border-borderSoft bg-surfaceAlt px-4 py-2 text-sm outline-none focus:border-accent"
+              />
+            </div>
+          )}
+          <CompactPager currentPage={currentPage} totalPages={totalPages} goToPage={goToPage} />
         </div>
       </div>
 
-      {/* Toolbar aksi khusus super_admin/admin (Add/Change/Delete/Insert/
-          Modify/Protect) — TableRowActionBar sendiri yang menentukan
-          apakah tampil atau tidak berdasarkan role user login. */}
       <TableRowActionBar onAction={onRowAction} visibleActions={visibleActions} module={module} />
 
       <div className="overflow-x-auto">
@@ -161,54 +358,15 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {isLoading ? (
-              <tr>
-                <td colSpan={columns.length + 1} className="py-8 text-center text-textMuted">
-                  Memuat data...
-                </td>
-              </tr>
-            ) : null}
-            {!isLoading && errorMessage ? (
-              <tr>
-                <td colSpan={columns.length + 1} className="py-8 text-center text-dangerText">
-                  {errorMessage}
-                </td>
-              </tr>
-            ) : null}
-            {!isLoading && !errorMessage && pagedRows.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length + 1} className="py-8 text-center text-textMuted">
-                  Tidak ada data yang cocok.
-                </td>
-              </tr>
-            ) : null}
-            <AnimatePresence initial={false} mode="popLayout">
-              {!isLoading &&
-                !errorMessage &&
-                pagedRows.map((row, index) => (
-                  <motion.tr
-                    key={getRowId(row)}
-                    layout
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.25, delay: index * 0.03 }}
-                    className="border-b border-borderSoft transition-colors last:border-0 hover:bg-surfaceAlt"
-                  >
-                    <td className="py-3 pr-4 text-center text-textMuted">
-                      {(currentPage - 1) * pageSize + index + 1}
-                    </td>
-                    {columns.map((column) => (
-                      <td
-                        key={column.key}
-                        className={`py-3 pr-4 text-text ${alignClass(column.align)}`}
-                      >
-                        {column.render(row)}
-                      </td>
-                    ))}
-                  </motion.tr>
-                ))}
-            </AnimatePresence>
+            <DataTableBody
+              columns={columns}
+              pagedRows={pagedRows}
+              getRowId={getRowId}
+              isLoading={isLoading}
+              errorMessage={errorMessage}
+              currentPage={currentPage}
+              rowsPerPage={serverPagination?.limit ?? pageSize}
+            />
           </tbody>
         </table>
       </div>
@@ -216,7 +374,7 @@ export function DataTable<T>({
       <div className="flex items-center justify-center gap-2 pt-1">
         <motion.button
           type="button"
-          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+          onClick={() => goToPage(currentPage - 1)}
           disabled={currentPage === 1}
           aria-label="Halaman sebelumnya"
           whileHover={currentPage === 1 ? undefined : { scale: 1.12, x: -2 }}
@@ -225,31 +383,10 @@ export function DataTable<T>({
         >
           ‹
         </motion.button>
-        {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
-          <motion.button
-            key={pageNumber}
-            type="button"
-            onClick={() => setPage(pageNumber)}
-            aria-current={pageNumber === currentPage}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.92 }}
-            className="relative flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold text-textMuted transition-colors hover:bg-surfaceAlt"
-          >
-            {pageNumber === currentPage ? (
-              <motion.span
-                layoutId={`${title}-page-pill`}
-                className="absolute inset-0 rounded-full bg-accent"
-                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-              />
-            ) : null}
-            <span className={`relative z-10 ${pageNumber === currentPage ? 'text-white' : ''}`}>
-              {pageNumber}
-            </span>
-          </motion.button>
-        ))}
+        <PageNumberButtons currentPage={currentPage} totalPages={totalPages} tableTitle={title} goToPage={goToPage} />
         <motion.button
           type="button"
-          onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+          onClick={() => goToPage(currentPage + 1)}
           disabled={currentPage === totalPages}
           aria-label="Halaman berikutnya"
           whileHover={currentPage === totalPages ? undefined : { scale: 1.12, x: 2 }}

@@ -1,11 +1,5 @@
-import { ReportPageTemplate } from '@/component/laporan/ReportPageTemplate';
+import { redirect } from 'next/navigation';
 
-export default function Page(): React.JSX.Element {
-  return (
-    <ReportPageTemplate
-      title="Laporan Barang Keluar"
-      breadcrumb="Laporan / Laporan Barang Keluar"
-      reportType="Barang Keluar"
-    />
-  );
+export default function Page(): never {
+  redirect('/reports/barang-keluar');
 }

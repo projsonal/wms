@@ -1,5 +1,5 @@
-import { WarehouseListContent } from '@/component/gudang/WarehouseList';
+import { redirect } from 'next/navigation';
 
-export default function Page(): React.JSX.Element {
-  return <WarehouseListContent />;
+export default function Page(): never {
+  redirect('/warehouse-management');
 }

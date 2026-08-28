@@ -26,21 +26,12 @@ export interface NavGroup {
 const ALL_ROLES: UserRole[] = ['super_admin', 'admin', 'karyawan'];
 export const STAFF_ROLES: UserRole[] = ['super_admin', 'admin'];
 
-/**
- * Struktur menu sidebar mengikuti desain asli WMS-RSD.
- * "Manajemen User" dan "Manajemen Aset Gudang" dibatasi untuk Super Admin & Admin
- * — Karyawan tidak diberi akses administratif ke user maupun manajemen aset lintas gudang.
- */
 export const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Menu Utama',
     links: [
       { label: 'Dashboard', href: '/dashboard', roles: ALL_ROLES },
-      { label: 'Pickup & Dropoff', href: '/pickup-dropoff', roles: ALL_ROLES },
-      { label: 'Purchase Order', href: '/purchase-order', roles: STAFF_ROLES },
-      { label: 'WMS', href: '/warehouse', roles: ALL_ROLES },
-      { label: 'Supplier', href: '/supplier', roles: STAFF_ROLES },
-      { label: 'Inventaris', href: '/inventory', roles: ALL_ROLES },
+      { label: 'Ringkasan Stok', href: '/inventory', roles: ALL_ROLES },
     ],
   },
   {
@@ -50,12 +41,11 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Barang Keluar', href: '/barang-keluar', roles: ALL_ROLES },
       { label: 'Barang Rusak', href: '/barang-rusak', roles: ALL_ROLES },
       { label: 'Kelola Barang', href: '/kelola-barang', roles: ALL_ROLES },
+      { label: 'Unit Barang (Nomor Seri)', href: '/unit-barang', roles: ALL_ROLES },
     ],
   },
   {
     links: [
-      { label: 'COD Monitoring', href: '/cod-monitoring', roles: ALL_ROLES },
-      { label: 'Monitoring Pengiriman', href: '/delivery-monitoring', roles: ALL_ROLES },
       { label: 'Analisa Data', href: '/data-analysis', roles: STAFF_ROLES },
     ],
   },
@@ -65,7 +55,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Manajemen User', href: '/user-management', roles: ['super_admin'] },
       { label: 'Manajemen Aset Gudang', href: '/aset-gudang', roles: ALL_ROLES },
       { label: 'Tracking Aset', href: '/tracking-aset', roles: ALL_ROLES },
-      { label: 'Manajemen Gudang', href: '/warehouse-management', roles: STAFF_ROLES },
+
+      { label: 'Manajemen Gudang', href: '/warehouse-management', roles: ALL_ROLES },
       { label: 'Manajemen Inventaris', href: '/inventory-management', roles: STAFF_ROLES },
     ],
   },
@@ -75,6 +66,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Laporan Inventaris', href: '/reports/inventory', roles: STAFF_ROLES },
       { label: 'Laporan Barang Masuk', href: '/reports/barang-masuk', roles: STAFF_ROLES },
       { label: 'Laporan Barang Keluar', href: '/reports/barang-keluar', roles: STAFF_ROLES },
+      { label: 'Laporan Barang Rusak', href: '/reports/barang-rusak', roles: STAFF_ROLES },
       { label: 'Laporan Barang Retur', href: '/reports/returns', roles: STAFF_ROLES },
       { label: 'Laporan Stock Opname', href: '/reports/warehouse', roles: STAFF_ROLES },
     ],

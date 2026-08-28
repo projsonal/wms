@@ -1,23 +1,7 @@
-/**
- * Bentuk mentah respons backend gostock SETELAH dilewatkan `camelizeKeysDeep`
- * (lihat lib/api/client.ts) — field masih bahasa Indonesia (nama Go struct
- * di internal/model/*.go), BEDA dari tipe UI di `types/index.ts` yang sudah
- * di-Inggris-kan untuk kebutuhan tampilan. File ini adalah "kontrak" dengan
- * backend; `lib/api/modules.ts` yang menerjemahkannya ke tipe UI.
- */
 
-/** Status dokumen draft-berjalan (Barang Masuk/Keluar, Stock Opname) —
- * dipakai berulang di beberapa Raw*, diekstrak jadi satu alias supaya
- * tidak duplikat union literal yang sama persis (SonarQube S4323). */
+
 export type DraftDocumentStatus = 'draft' | 'selesai' | 'dibatalkan';
 
-/** Status Barang Masuk SAJA — backend cons_barangMasuk.go SENGAJA
- * menyimpan versi BERKAPITAL ("Draft"/"Selesai"/"Dibatalkan"), beda
- * dengan Barang Keluar & Stock Opname yang simpan huruf kecil biasa
- * (DraftDocumentStatus di atas) — inkonsistensi ini ada di backend itu
- * sendiri, bukan salah frontend. JANGAN disatukan lagi dengan
- * DraftDocumentStatus, itu penyebab bug lama (status Barang Masuk selain
- * "Draft" gagal ke-lookup di frontend). */
 export type BarangMasukStatus = 'Draft' | 'Selesai' | 'Dibatalkan';
 
 export interface RawKategori {
@@ -31,41 +15,42 @@ export interface RawSatuan {
   singkatan: string;
 }
 
-export interface RawRak {
+export interface RawBarangSerial {
   id: number;
-  kodeRak: string;
-  gudangId: number;
-  kapasitas: number;
-  terisi: number;
-  status: 'kosong' | 'terisi_sebagian' | 'penuh';
+  barangId: number;
+  barang?: RawBarang;
+  serialNumber: string;
+  status: 'tersedia' | 'terpasang' | 'rusak';
+  gudangId?: number | null;
+  gudang?: RawGudang;
+  barangMasukItemId?: number | null;
+  barangKeluarItemId?: number | null;
+  catatan?: string;
+  createdAt: string;
+  updatedAt: string;
+
+  nomorBarangMasuk?: string;
+  nomorBarangKeluar?: string;
 }
 
 export interface RawGudang {
   id: number;
   nama: string;
-  /** Kode singkat gudang (mis. "BBU", "MAHANG") — prefix label RSD aset,
-   * lihat internal/model/asset.go & internal/controller/asset. */
+
   kode?: string;
   alamat?: string;
   pic?: string;
-  /** Nomor kontak gudang — "No. Telepon Pengirim" di resi pengiriman. */
+
   telepon?: string;
   kapasitas?: number;
   latitude?: number | null;
   longitude?: number | null;
-  /** Daftar rak di gudang ini — dipakai menghitung "Kapasitas Terpakai"
-   * (SUM terisi) & "Total Barang" (SUM terisi juga, karena unit yang
-   * "terisi" di rak = unit fisik yang ada di gudang itu) secara otomatis,
-   * TANPA sensor IoT — angka `terisi` per rak sudah mutakhir sendiri lewat
-   * proses Barang Masuk/Keluar/Stock Opname di backend (lihat
-   * adjustRak() di internal/repositories/barang_masuk/barang_masuk_repos.go).
-   * Catatan: hanya akurat untuk item yang di-assign ke rak spesifik saat
-   * input dokumen (field rak_id) — item tanpa rak_id tidak terhitung. */
-  raks?: RawRak[];
   isProtected?: boolean;
+
+  unitTersedia?: number;
+  skuTersedia?: number;
 }
 
-/** internal/model/barang.go */
 export interface RawBarang {
   id: number;
   kodeBarang: string;
@@ -77,50 +62,32 @@ export interface RawBarang {
   hargaBeli: number;
   stokMinimum: number;
   stok: number;
-  /** Berat satuan dalam gram, opsional — dipakai di resi pengiriman. */
+
   beratGram?: number | null;
   isActive: boolean;
   isProtected?: boolean;
+
+  isSerialized?: boolean;
+  merek?: string;
+  tipe?: string;
   deskripsi?: string;
-  /** Alur persetujuan (khusus barang yang dibuat role admin) — lihat
-   * internal/controller/barang Approve()/Reject(). */
+
   approvalStatus?: 'disetujui' | 'menunggu' | 'ditolak';
   diajukanOleh?: number | null;
   disetujuiOleh?: number | null;
   catatanApproval?: string;
   direviewPada?: string | null;
+
+  didelegasikanKe?: number | null;
+  didelegasikan?: { id: number; fullName: string } | null;
+  createdAt: string;
   updatedAt: string;
 }
 
-/** internal/model/supplier.go */
-export interface RawSupplier {
-  id: number;
-  kode: string;
-  nama: string;
-  pic?: string | null;
-  telepon?: string;
-  /** Daftar kurir mitra dipisah koma (mis. "JNE,J&T,Lalamove") — dipakai
-   * backend mencocokkan ke Pengiriman.namaKurir untuk menghitung
-   * totalOrder/rating (lihat SupplierResponse di internal/controller/
-   * supplier/struct.go). Menggantikan field `email` lama. */
-  kerjasamaKurir?: string;
-  alamat?: string;
-  npwp?: string | null;
-  isActive: boolean;
-  isProtected?: boolean;
-  catatan?: string;
-  /** Dihitung backend saat List/Detail, bukan kolom tersimpan. */
-  totalOrder?: number;
-  rating?: number;
-  updatedAt: string;
-}
-
-/** internal/model/barang_masuk.go */
 export interface RawBarangMasukItem {
   id: number;
   barangId: number;
   barang?: RawBarang;
-  rakId?: number | null;
   qty: number;
   hargaSatuan: number;
 }
@@ -128,9 +95,6 @@ export interface RawBarangMasukItem {
 export interface RawBarangMasuk {
   id: number;
   nomorPenerimaan: string;
-  purchaseOrderId?: number | null;
-  supplierId?: number | null;
-  supplier?: RawSupplier;
   gudangId: number;
   gudang?: RawGudang;
   tanggal: string;
@@ -140,12 +104,10 @@ export interface RawBarangMasuk {
   updatedAt: string;
 }
 
-/** internal/model/barang_keluar.go */
 export interface RawBarangKeluarItem {
   id: number;
   barangId: number;
   barang?: RawBarang;
-  rakId?: number | null;
   qty: number;
 }
 
@@ -162,7 +124,6 @@ export interface RawBarangKeluar {
   updatedAt: string;
 }
 
-/** internal/model/asset.go */
 export interface RawAsset {
   id: number;
   nama: string;
@@ -175,22 +136,25 @@ export interface RawAsset {
   longitude?: number | null;
   status: 'aktif' | 'rusak' | 'nonaktif';
   keterangan?: string;
-  ipAddress?: string;
-  pingStatus?: 'online' | 'offline' | 'unknown';
-  lastPingAt?: string | null;
+  merek?: string;
+  tipe?: string;
   parentAssetId?: number | null;
   jumlahPort?: number;
+
+  barangId?: number | null;
+  barang?: { id: number; kodeBarang: string; nama: string };
   createdAt: string;
   updatedAt: string;
 }
 
-/** internal/model/barang_rusak.go */
 export interface RawBarangRusak {
   id: number;
   barangId?: number | null;
-  barang?: { id: number; nama: string; kodeBarang: string };
+  barang?: { id: number; nama: string; kodeBarang: string; merek?: string; tipe?: string };
   labelBarang: string;
   namaBarang: string;
+
+  serialNumber?: string;
   keterangan?: string;
   fotoUrl?: string;
   jenisBarang?: 'retur' | 'rusak' | '';
@@ -204,7 +168,6 @@ export interface RawBarangRusak {
   updatedAt: string;
 }
 
-/** internal/controller/users Response struct. */
 export interface RawUser {
   id: number;
   username: string;
@@ -220,9 +183,18 @@ export interface RawUser {
   lastLoginAt?: string | null;
 }
 
-/** internal/model/stock_opname.go — modul Stock Opname, dokumen berisi
- * BANYAK item sekaligus per sesi hitung fisik (bukan satu-baris-satu-
- * penyesuaian seperti anggapan versi lama frontend). */
+export interface RawUserSession {
+  id: number;
+  browser?: string;
+  browserVersion?: string;
+  os?: string;
+  osVersion?: string;
+  deviceType?: string;
+  ipAddress?: string;
+  location?: string;
+  createdAt: string;
+}
+
 export interface RawStockOpnameItem {
   id: number;
   barangId: number;
@@ -245,55 +217,12 @@ export interface RawStockOpname {
   items?: RawStockOpnameItem[];
 }
 
-/** internal/model/po.go */
-export interface RawPurchaseOrderItem {
-  id: number;
+export interface RawRingkasanStokRow {
   barangId: number;
-  barang?: RawBarang;
-  qty: number;
-  hargaSatuan: number;
+  kodeBarang: string;
+  namaBarang: string;
+  gudangId: number;
+  namaGudang: string;
+  stok: number;
 }
 
-export interface RawPurchaseOrder {
-  id: number;
-  nomorPo: string;
-  supplierId: number;
-  supplier?: RawSupplier;
-  status: 'Draft' | 'Diajukan' | 'Disetujui' | 'Ditolak' | 'Dibatalkan';
-  tanggalPo: string;
-  catatanPengajuan?: string;
-  catatanApproval?: string;
-  totalEstimasi: number;
-  isProtected?: boolean;
-  items?: RawPurchaseOrderItem[];
-  updatedAt: string;
-}
-
-/** internal/model/pengiriman.go */
-export interface RawPengiriman {
-  id: number;
-  nomorPengiriman: string;
-  gudangAsalId: number;
-  gudangAsal?: RawGudang;
-  /** Dokumen Barang Keluar yang jadi dasar pengiriman ini (kalau ada) —
-   * dipakai sebagai "Order ID" & daftar item (SKU/qty/berat) di resi. */
-  barangKeluarId?: number | null;
-  barangKeluar?: RawBarangKeluar;
-  jenisPengambilan: 'pickup' | 'dropoff';
-  namaPenerima: string;
-  teleponPenerima?: string;
-  alamatTujuan?: string;
-  destLat?: number | null;
-  destLng?: number | null;
-  namaKurir?: string;
-  teleponKurir?: string;
-  status: 'Draft' | 'Dijadwalkan' | 'Dalam Perjalanan' | 'Terkirim' | 'Dibatalkan';
-  tanggalKirim: string;
-  estimasiTiba?: string | null;
-  waktuTerkirim?: string | null;
-  catatan?: string;
-  lastLat?: number | null;
-  lastLng?: number | null;
-  lastLocationAt?: string | null;
-  isProtected?: boolean;
-}

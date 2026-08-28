@@ -10,12 +10,13 @@ interface VerifySuccessStepProps {
   onFinish: () => void;
 }
 
-export function VerifySuccessStep({ session, onFinish }: VerifySuccessStepProps): React.JSX.Element {
+export function VerifySuccessStep({ session, onFinish }: Readonly<VerifySuccessStepProps>): React.JSX.Element {
   const rows: [string, string][] = [
     ['Browser', session ? `${session.browser} ${session.browserVersion}`.trim() : '-'],
     ['Sistem Operasi', session ? `${session.os} ${session.osVersion}`.trim() : '-'],
-    ['Alamat IP', session?.ipAddress ?? '-'],
-    ['Lokasi', session?.location ?? '-'],
+
+    ['Alamat IP', session?.ipAddress || '-'],
+    ['Lokasi', session?.location || '-'],
   ];
 
   return (
@@ -81,11 +82,11 @@ interface VerifyFailedStepProps {
   onBack: () => void;
 }
 
-export function VerifyFailedStep({ onRetry, onBack }: VerifyFailedStepProps): React.JSX.Element {
+export function VerifyFailedStep({ onRetry, onBack }: Readonly<VerifyFailedStepProps>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4 text-center">
       <h2 className="text-base font-semibold text-text">Verifikasi Gagal</h2>
-      <p className="text-xs text-textMuted">Kode OTP salah atau sudah kedaluwarsa.</p>
+      <p className="text-xs text-textMuted">Kode OTP salah atau sudah kedaluwarsa. Silakan coba lagi dengan kode yang baru</p>
       <div className="flex justify-center">
         <motion.span
           className="flex h-14 w-14 items-center justify-center rounded-full bg-dangerBg text-2xl text-dangerText"

@@ -14,29 +14,15 @@ export interface ActivityItem {
 
 interface RecentActivityCardProps {
   items: ActivityItem[];
-  /** Ditampilkan menggantikan daftar kalau fetch ke backend gagal — beda
-   * dari kondisi "memang belum ada aktivitas" (list kosong tanpa error). */
+
   errorMessage?: string;
 }
 
-// Batas tinggi daftar sebelum scroll — supaya panjang daftar TIDAK ikut
-// mendorong-dorong layout dashboard (kartu Traffic Pengiriman/Rekap Data di
-// sampingnya jadi ikut memanjang tak beraturan kalau tidak dibatasi).
 const LIST_MAX_HEIGHT_CLASS = 'max-h-72';
 
-// "Baca" & "hapus" di sini SENGAJA disimpan di localStorage (per
-// browser/device), BUKAN lewat API — karena /dashboard/activity bukan tabel
-// notifikasi sungguhan, tapi hasil UNION query real-time dari transaksi
-// (barang masuk/keluar, PO, pengiriman, stock opname, lihat
-// dashboard_extra.go Activity()). Tidak ada baris yang bisa "dihapus" di
-// database (menghapusnya berarti menghapus riwayat transaksi asli — jelas
-// bukan itu maksudnya), jadi "hapus" di sini artinya "sembunyikan dari
-// daftar aktivitas SAYA", bukan menghapus data. Kalau ke depannya perlu
-// tersinkron antar-device per akun, ini bisa diganti ke endpoint backend
-// sungguhan (pola yang sama seperti /notifications MarkRead/MarkAllRead).
 const READ_STORAGE_KEY = 'wms.dashboardActivity.readIds';
 const DISMISSED_STORAGE_KEY = 'wms.dashboardActivity.dismissedIds';
-const MAX_STORED_IDS = 200; // jaga-jaga supaya localStorage tidak membengkak tanpa batas
+const MAX_STORED_IDS = 200;
 
 function readIdSet(key: string): Set<string> {
   try {
@@ -57,15 +43,12 @@ function writeIdSet(key: string, ids: Set<string>): void {
 }
 
 export function RecentActivityCard({ items, errorMessage }: Readonly<RecentActivityCardProps>): React.JSX.Element {
-  // Mulai dari Set kosong di server MAUPUN render pertama di client (SAMA
-  // PERSIS) supaya tidak ada hydration mismatch — localStorage baru dibaca
-  // di dalam useEffect (lihat catatan react-hooks/set-state-in-effect di
-  // bawah), yang hanya jalan setelah mount di browser.
+
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- baca localStorage setelah mount, sengaja beda dari render server supaya tidak hydration-mismatch (lihat catatan di atas state)
+
     setReadIds(readIdSet(READ_STORAGE_KEY));
     setDismissedIds(readIdSet(DISMISSED_STORAGE_KEY));
   }, []);
@@ -151,9 +134,7 @@ export function RecentActivityCard({ items, errorMessage }: Readonly<RecentActiv
                   <p className={isRead ? 'text-textMuted' : 'text-text'}>{item.message}</p>
                   <p className="text-xs text-textMuted">{item.timeAgo}</p>
                 </div>
-                {/* Ikon hapus baru muncul saat hover/focus — sengaja tidak
-                    selalu tampil supaya daftar tidak terasa ramai (lihat
-                    permintaan awal: "ga terlalu ramai"). */}
+
                 <button
                   type="button"
                   onClick={() => handleDismiss(item.id)}

@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { appInfoApi } from '@/lib/api/modules';
 
-const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 menit — cukup jarang supaya tidak membebani server
+const POLL_INTERVAL_MS = 5 * 60 * 1000;
 
 export function VersionWatcher(): null {
   const knownVersionRef = useRef<string | null>(null);

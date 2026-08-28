@@ -67,7 +67,7 @@ export function AccountLockoutBanner({ message, onExpire }: Readonly<AccountLock
         </motion.span>
         <div>
           <p className="text-sm font-semibold text-dangerText">Akun terkunci sementara</p>
-          <p className="text-xs text-textMuted">Terlalu banyak percobaan masuk.</p>
+          <p className="text-xs text-textMuted">Kamu terlalu banyak percobaan untuk masuk ke aplikasi. Silakan cek password kamu</p>
         </div>
       </div>
 
@@ -92,7 +92,7 @@ export function AccountLockoutBanner({ message, onExpire }: Readonly<AccountLock
       </div>
 
       <p className="text-center text-xs text-textMuted">
-        Kamu bisa coba masuk lagi otomatis setelah waktunya habis.
+        Kamu bisa coba masuk lagi otomatis ketika waktunya habis.
       </p>
     </motion.div>
   );

@@ -9,12 +9,6 @@ interface PageShellProps {
   children: ReactNode;
 }
 
-/**
- * Bingkai standar setiap halaman dashboard: Header (judul + breadcrumb),
- * area konten utama, lalu Footer. Dipakai oleh semua komponen konten di
- * `component/gudang`, `component/pengiriman`, `component/laporan`, dan
- * `component/content`, supaya halaman page.tsx tetap tipis.
- */
 export function PageShell({ title, breadcrumb, action, children }: PageShellProps): React.JSX.Element {
   return (
     <>

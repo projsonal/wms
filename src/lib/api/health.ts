@@ -1,9 +1,4 @@
-/**
- * Endpoint health check backend gostock (internal/health) didaftarkan di
- * ROOT app, BUKAN di bawah prefix `/stockrsd` seperti endpoint lain —
- * lihat internal/routes/router.go: `app.Get("/health", ...)` dipanggil
- * sebelum `api := app.Group("/stockrsd")`.
- */
+
 
 function resolveHealthUrl(): string {
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080/stockrsd';
@@ -13,12 +8,11 @@ function resolveHealthUrl(): string {
 
 export interface BackendHealthResult {
   reachable: boolean;
-  /** true kalau server merespons TAPI melaporkan salah satu komponen inti (mis. DB) bermasalah. */
+
   degraded: boolean;
   message: string;
 }
 
-/** Dipakai untuk diagnosa cepat saat halaman login gagal menghubungi backend. */
 export async function checkBackendHealth(): Promise<BackendHealthResult> {
   const url = resolveHealthUrl();
   try {

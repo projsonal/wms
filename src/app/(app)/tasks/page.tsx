@@ -1,5 +1,5 @@
-import { TaskManagementContent } from '@/component/content/TaskManagement';
+import { redirect } from 'next/navigation';
 
-export default function Page(): React.JSX.Element {
-  return <TaskManagementContent />;
+export default function Page(): never {
+  redirect('/dashboard');
 }

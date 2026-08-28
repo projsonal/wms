@@ -19,19 +19,6 @@ interface RoadRoute {
   durationMin: number;
 }
 
-/**
- * Ambil rute JALAN SUNGGUHAN (mengikuti jalan raya, bukan garis lurus) dari
- * OSRM (Open Source Routing Machine) — server demo publik gratis milik
- * proyek OSRM sendiri, tidak perlu API key. Dipakai HANYA saat user
- * menekan tombol "Tampilkan Rute" (bukan otomatis), supaya tidak membebani
- * server publik itu dengan request otomatis tiap kali peta dibuka.
- *
- * Catatan jujur: ini server DEMO publik (bukan milik kita, bukan untuk
- * beban produksi tinggi) — cukup untuk kebutuhan "kasih gambaran rute ke
- * kurir", bukan pengganti Google Maps/Waze sungguhan. Kalau butuh lebih
- * andal, ganti URL_BASE dengan server OSRM sendiri atau layanan
- * berbayar (Mapbox/Google Directions).
- */
 async function fetchRoadRoute(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
@@ -43,7 +30,7 @@ async function fetchRoadRoute(
   const route = data?.routes?.[0];
   if (!route?.geometry?.coordinates) return null;
   return {
-    // GeoJSON pakai urutan [lng, lat] — Leaflet butuh [lat, lng], jadi dibalik.
+
     points: route.geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng]),
     distanceKm: route.distance / 1000,
     durationMin: route.duration / 60,
@@ -57,35 +44,14 @@ interface RouteTrackingMapProps {
   originCoord?: { lat: number; lng: number };
   destinationLabel: string;
   destinationCoord?: { lat: number; lng: number };
-  /** Pusat peta default kalau TIDAK ADA satu pun koordinat yang valid
-   * (asal, tujuan, maupun posisi kurir) — supaya peta tidak crash. */
+
   fallbackCenter: { lat: number; lng: number };
-  /** true kalau dokumen pengiriman berstatus "terkirim" — lihat catatan
-   * di RouteMarkers/effectiveCourierPos kenapa ini mengubah titik yang
-   * ditampilkan sebagai posisi kurir. */
+
   isDelivered?: boolean;
-  /** Dipanggil tiap kali rute jalan sungguhan (OSRM) berhasil dihitung —
-   * dipakai StatCards di DeliveryDetail.tsx supaya kartu "Jarak Tempuh"
-   * menampilkan angka HASIL PERHITUNGAN RUTE JALAN ini, bukan
-   * `delivery.distanceKm` statis dari backend yang tidak pernah
-   * ter-update (itu sebabnya sebelumnya selalu kelihatan "0 km" walau
-   * rute sudah tergambar di peta). */
+
   onRouteComputed?: (route: { distanceKm: number; durationMin: number }) => void;
 }
 
-/**
- * Peta pelacakan LENGKAP — beda dari LiveTrackingMap.tsx lama yang cuma
- * menampilkan satu titik (posisi kurir/gudang asal): di sini digambar
- * marker ASAL, marker TUJUAN (kalau koordinatnya sudah diisi lewat form
- * Jadwalkan Pickup/Dropoff), marker POSISI KURIR live (polling tiap 5
- * detik), garis lurus asal→kurir→tujuan sebagai default, DAN rute jalan
- * sungguhan (lihat fetchRoadRoute, OSRM, profil "driving" — mengikuti
- * jalan raya yang bisa dilalui motor maupun mobil, bukan jalur pejalan
- * kaki) yang otomatis dihitung SEKALI begitu titik asal & tujuan
- * tersedia (lihat useEffect auto-fetch di bawah), menggantikan garis
- * lurus itu. Tombol "Tampilkan Rute" tetap ada untuk hitung ULANG manual
- * kalau kurir sudah jauh menyimpang dari rute awal.
- */
 export function RouteTrackingMap({
   deliveryId,
   courierName,
@@ -100,24 +66,16 @@ export function RouteTrackingMap({
   const [courierPos, setCourierPos] = useState<{ lat: number; lng: number } | null>(null);
   const [recordedAt, setRecordedAt] = useState<string | null>(null);
   const [roadRoute, setRoadRoute] = useState<RoadRoute | null>(null);
-  // Koordinat tujuan yang dipakai SAAT roadRoute dihitung — dibandingkan
-  // saat render (bukan lewat useEffect terpisah yang setState) supaya
-  // rute basi otomatis diabaikan kalau koordinat tujuan berubah, tanpa
-  // efek samping "setState di dalam effect" yang React anggap anti-pola.
+
   const [roadRouteDestKey, setRoadRouteDestKey] = useState<string | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
-  // Penanda "sudah pernah auto-fetch untuk kombinasi asal+tujuan INI" —
-  // beda dari roadRouteDestKey (yang cuma lacak tujuan) karena auto-fetch
-  // harus tepat SEKALI per kombinasi, tidak boleh nembak ulang tiap
-  // courierPos bergeser sedikit dari polling 5 detik (baru itu yang
-  // dianggap "membebani server publik tiap kali peta dibuka" — beda dari
-  // 1x saat rute memang baru pertama kali bisa dihitung).
+
   const autoFetchedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     import('leaflet').then((L) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- properti internal Leaflet, tidak ada di typing publik
+
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -128,11 +86,7 @@ export function RouteTrackingMap({
   }, []);
 
   useEffect(() => {
-    // Sudah terkirim -> kurir sudah selesai & (lihat ShareLocationButton
-    // di DeliveryDetail.tsx) tidak lagi membagikan lokasi, jadi polling
-    // posisi live tidak berguna lagi -- titik akhir yang relevan adalah
-    // titik TUJUAN (lihat effectiveCourierPos di bawah), bukan posisi GPS
-    // terakhir yang mungkin terekam sedikit sebelum benar-benar sampai.
+
     if (isDelivered) return;
     let cancelled = false;
     async function poll(): Promise<void> {
@@ -155,17 +109,10 @@ export function RouteTrackingMap({
     };
   }, [deliveryId, isDelivered]);
 
-  // Sudah terkirim & titik tujuan sudah diisi -> anggap kurir "ada" di
-  // titik tujuan (memenuhi permintaan: "titik koordinatnya muncul di
-  // titik akhir" begitu pengiriman diselesaikan), bukan tetap menampilkan
-  // posisi GPS terakhir yang mungkin meleset dari lokasi tujuan
-  // sebenarnya. Kalau tujuan belum diisi koordinatnya, tetap pakai posisi
-  // GPS terakhir yang sempat terekam sebagai fallback.
   const effectiveCourierPos = isDelivered && destinationCoord ? destinationCoord : courierPos;
 
   const destKey = destinationCoord ? `${destinationCoord.lat},${destinationCoord.lng}` : null;
-  // Rute basi (dihitung untuk tujuan yang berbeda dari sekarang) diabaikan
-  // saat render, bukan dibersihkan lewat effect terpisah.
+
   const activeRoadRoute = roadRouteDestKey === destKey ? roadRoute : null;
 
   async function handleShowRoute(): Promise<void> {
@@ -198,15 +145,6 @@ export function RouteTrackingMap({
   const hasAnyCoord = Boolean(originCoord || destinationCoord || effectiveCourierPos);
   const canShowRoute = Boolean((effectiveCourierPos ?? originCoord) && destinationCoord);
 
-  // Auto-hitung rute jalan SEKALI begitu titik asal/kurir & tujuan
-  // sama-sama tersedia — memenuhi permintaan "otomatis diarahkan rute",
-  // tapi tetap dijaga supaya tidak menembak OSRM berulang-ulang tiap
-  // courierPos bergeser dikit dari polling 5 detik: kunci
-  // autoFetchedKeyRef dari kombinasi titik AWAL saja (originCoord kalau
-  // ada, atau "courier" generik), bukan posisi live yang terus berubah —
-  // begitu kombinasi asal+tujuan pernah di-auto-fetch, tidak akan
-  // nembak ulang otomatis lagi (tombol "Tampilkan Rute" tetap bisa
-  // dipakai manual kapan saja untuk hitung ulang).
   useEffect(() => {
     if (!canShowRoute || isLoadingRoute) return;
     const autoKey = `${originCoord ? 'o' : 'c'}:${destKey}`;

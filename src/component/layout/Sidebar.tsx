@@ -15,10 +15,6 @@ import { useAuthedImage } from '@/lib/hooks/useAuthedImage';
 const EXPANDED_WIDTH = 256;
 const COLLAPSED_WIDTH = 76;
 
-/**
- * Isi sidebar (logo, nav, kartu profil) — dipakai ulang oleh mode desktop
- * (sticky, bisa diciutkan) dan mode mobile (drawer overlay penuh).
- */
 function SidebarBody({
   collapsed,
   onNavigate,
@@ -107,19 +103,16 @@ function SidebarBody({
             </div>
           ))}
         </nav>
-        {/* Setting — tersedia untuk SEMUA role. Diletakkan sebagai item
-            terakhir daftar nav (di atas kartu profil/Logout), persis
-            seperti posisinya di mockup: baris penuh dengan aksen border
-            kiri saat aktif, terpisah sedikit dari grup Laporan di atasnya. */}
+
         <div className="mt-4 border-t border-white/10 pt-3">
           <Link
-            href="/(app)/settings"
+            href="/settings"
             onClick={onNavigate}
             title={collapsed ? 'Settings' : undefined}
             className={clsx(
               'relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors',
               collapsed && 'justify-center px-0 py-2.5',
-              pathname === '/(app)/settings' || pathname.startsWith('/(app)/settings/')
+              pathname === '/settings' || pathname.startsWith('/settings/')
                 ? 'bg-accent text-white'
                 : 'text-white/80 hover:bg-white/10 hover:text-white',
             )}
@@ -139,13 +132,9 @@ function SidebarBody({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
       >
-        {/* Klik avatar/nama -> Settings (sama seperti link Settings di atas,
-            ditaruh di sini juga karena ini area yang biasa diklik user untuk
-            "buka pengaturan akun saya"). Tombol Logout di dalamnya SENGAJA
-            memanggil stopPropagation supaya klik Logout tidak ikut memicu
-            navigasi ke Settings. */}
+
         <Link
-          href="/(app)/settings"
+          href="/settings"
           onClick={onNavigate}
           title={collapsed ? t('sidebar.settings') : undefined}
           className={clsx(
@@ -155,7 +144,7 @@ function SidebarBody({
         >
           <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutralBg">
             <span className="absolute inset-0 rounded-full animate-wms-glow-pulse" />
-            {/* eslint-disable-next-line @next/next/no-img-element -- avatarUrl dari domain backend terpisah; default-avatar.png aset statis lokal, keduanya butuh <img> polos */}
+
             <img
               src={avatarUrl ?? '/assets/default-avatar.png'}
               alt=""
@@ -199,13 +188,12 @@ function SidebarBody({
   );
 }
 
-/** Sidebar desktop: sticky penuh tinggi layar, bisa diciutkan jadi mode ikon. */
 export function Sidebar(): React.JSX.Element {
   const { isCollapsed, toggleCollapsed, isMobileOpen, closeMobile } = useSidebarState();
 
   return (
     <>
-      {/* Desktop: sticky di sisi kiri, ikut scroll, tinggi selalu penuh layar. */}
+
       <motion.aside
         animate={{ width: isCollapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
         transition={{ type: 'spring', stiffness: 260, damping: 32 }}
@@ -226,7 +214,6 @@ export function Sidebar(): React.JSX.Element {
         </motion.button>
       </motion.aside>
 
-      {/* Mobile: drawer overlay penuh dengan backdrop, dipicu tombol hamburger di Header. */}
       <AnimatePresence>
         {isMobileOpen ? (
           <>
@@ -263,7 +250,6 @@ export function Sidebar(): React.JSX.Element {
   );
 }
 
-/** Tombol hamburger untuk membuka drawer sidebar di layar kecil — dipasang di Header. */
 export function SidebarMobileToggle(): React.JSX.Element {
   const { openMobile } = useSidebarState();
   return (

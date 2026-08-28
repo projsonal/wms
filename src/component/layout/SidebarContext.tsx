@@ -1,15 +1,15 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 const COLLAPSE_STORAGE_KEY = 'wms_sidebar_collapsed';
 
 interface SidebarStateContextValue {
-  /** Sidebar desktop: true = lebar penuh (dengan label), false = ciut (ikon saja). */
+
   isCollapsed: boolean;
   toggleCollapsed: () => void;
-  /** Sidebar mobile: drawer overlay, default tertutup. */
+
   isMobileOpen: boolean;
   openMobile: () => void;
   closeMobile: () => void;
@@ -17,7 +17,7 @@ interface SidebarStateContextValue {
 
 const SidebarStateContext = createContext<SidebarStateContextValue | undefined>(undefined);
 
-export function SidebarStateProvider({ children }: { children: ReactNode }): React.JSX.Element {
+export function SidebarStateProvider({ children }: Readonly<{ children: ReactNode }>): React.JSX.Element {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -25,8 +25,7 @@ export function SidebarStateProvider({ children }: { children: ReactNode }): Rea
     if (typeof window === 'undefined') {
       return;
     }
-    // Preferensi collapse desktop disimpan lokal supaya konsisten antar halaman/kunjungan.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     setIsCollapsed(window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === '1');
   }, []);
 
@@ -43,10 +42,13 @@ export function SidebarStateProvider({ children }: { children: ReactNode }): Rea
   const openMobile = useCallback(() => setIsMobileOpen(true), []);
   const closeMobile = useCallback(() => setIsMobileOpen(false), []);
 
+  const contextValue = useMemo(
+    () => ({ isCollapsed, toggleCollapsed, isMobileOpen, openMobile, closeMobile }),
+    [isCollapsed, toggleCollapsed, isMobileOpen, openMobile, closeMobile],
+  );
+
   return (
-    <SidebarStateContext.Provider
-      value={{ isCollapsed, toggleCollapsed, isMobileOpen, openMobile, closeMobile }}
-    >
+    <SidebarStateContext.Provider value={contextValue}>
       {children}
     </SidebarStateContext.Provider>
   );

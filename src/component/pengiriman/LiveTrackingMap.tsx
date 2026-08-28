@@ -7,15 +7,10 @@ import { deliveriesApi } from '@/lib/api/modules';
 
 const POLL_INTERVAL_MS = 5000;
 
-/** Format "-" kalau belum ada timestamp, else waktu lengkap lokal ID. */
 function formatRecordedAt(recordedAt: string | null): string {
   return recordedAt ? new Date(recordedAt).toLocaleString('id-ID') : '-';
 }
 
-/** true hanya kalau kedua nilai benar-benar angka valid (bukan NaN/undefined/
- * null) — Leaflet melempar "Invalid LatLng object" tanpa fallback yang jelas
- * kalau salah satu koordinat undefined, jadi ini WAJIB dicek sebelum render
- * MapContainer maupun sebelum menyimpan posisi baru ke state. */
 function isValidCoord(lat: unknown, lng: unknown): lat is number {
   return typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng);
 }
@@ -30,17 +25,10 @@ const Popup = dynamic(() => import('react-leaflet').then((m) => m.Popup), { ssr:
 interface LiveTrackingMapProps {
   deliveryId: string;
   courierName: string;
-  /** Fallback kalau belum pernah ada ping GPS sama sekali (pusatkan peta
-   * di sini, mis. lokasi gudang asal). */
+
   fallbackCenter: { lat: number; lng: number };
 }
 
-/**
- * Peta pelacakan REAL-TIME — polling GET /pengiriman/:id/lokasi tiap 5
- * detik dan menampilkan posisi GPS kurir yang sesungguhnya (bukan titik
- * persentase statis seperti MapPlaceholder sebelumnya). Marker otomatis
- * pindah setiap ada ping baru dari ShareLocationButton di perangkat kurir.
- */
 export function LiveTrackingMap({
   deliveryId,
   courierName,
@@ -50,13 +38,9 @@ export function LiveTrackingMap({
   const [recordedAt, setRecordedAt] = useState<string | null>(null);
   const [hasEverLocated, setHasEverLocated] = useState(false);
 
-  // Perbaikan untuk masalah umum react-leaflet+Next.js: ikon marker
-  // default Leaflet mereferensikan path relatif ke modulnya sendiri yang
-  // rusak setelah di-bundle webpack/Turbopack (ikon jadi tidak muncul
-  // sama sekali tanpa error jelas). Timpa manual dengan URL CDN.
   useEffect(() => {
     import('leaflet').then((L) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- properti internal Leaflet, tidak ada di typing publik
+
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -73,10 +57,7 @@ export function LiveTrackingMap({
       try {
         const res = await deliveriesApi.track(deliveryId);
         if (cancelled) return;
-        // Cek numerik penuh (bukan cuma `!== null`) — respons API bisa saja
-        // punya field yang hilang/undefined kalau ada perubahan bentuk
-        // response di backend; itu HARUS dianggap "belum ada posisi",
-        // bukan diteruskan mentah ke MapContainer sampai bikin crash.
+
         if (typeof res.lat === 'number' && typeof res.lng === 'number' && Number.isFinite(res.lat) && Number.isFinite(res.lng)) {
           setPosition({ lat: res.lat, lng: res.lng });
           setRecordedAt(res.recordedAt);
@@ -95,10 +76,6 @@ export function LiveTrackingMap({
     };
   }, [deliveryId]);
 
-  // fallbackCenter juga divalidasi — kalau pemanggil kebetulan mengirim
-  // gudang yang belum diisi koordinat (latitude/longitude opsional di
-  // Warehouse, lihat types/index.ts), jangan sampai ikut merender peta
-  // dengan koordinat undefined juga.
   const center = position ?? (isValidCoord(fallbackCenter.lat, fallbackCenter.lng) ? fallbackCenter : null);
 
   return (

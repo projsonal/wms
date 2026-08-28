@@ -3,12 +3,11 @@
 import useSWR from 'swr';
 import { StatCard } from '@/component/ui/StatCard';
 import { TrendChartCard } from '@/component/charts/TrendChartCard';
-import { DeliveryTrackingCard } from '@/component/roles_dashboard/DeliveryTrackingCard';
 import { AttentionPanel } from '@/component/roles_dashboard/AttentionPanel';
 import { Card } from '@/component/ui/Card';
 import { Reveal } from '@/component/ui/Reveal';
 import Link from 'next/link';
-import { dashboardApi, deliveriesApi, itemsApi, purchaseOrdersApi } from '@/lib/api/modules';
+import { dashboardApi, itemsApi } from '@/lib/api/modules';
 import { listErrorMessage } from '@/lib/utils/errors';
 import { formatCurrency } from '@/lib/utils/format';
 import type { StatMetric, TrendPoint, UserRole } from '@/types';
@@ -34,9 +33,9 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
       ? [
           { id: 'total-barang', label: 'Total Barang', value: String(summaryRaw.kelolaBarang.totalBarang) },
           { id: 'stok-menipis', label: 'Stok Menipis', value: String(summaryRaw.kelolaBarang.stokMenipis) },
-          { id: 'po-menunggu', label: 'PO Menunggu Persetujuan', value: String(summaryRaw.purchaseOrder.menungguPersetujuan) },
+          { id: 'bm-draft', label: 'Barang Masuk Draft', value: String(summaryRaw.barangMasuk.draft) },
           ...(role === 'super_admin'
-            ? [{ id: 'rak-penuh', label: 'Rak Penuh', value: String(summaryRaw.gudang.rakPenuh) }]
+            ? [{ id: 'total-gudang', label: 'Total Gudang', value: String(summaryRaw.gudang.totalGudang) }]
             : []),
         ]
       : null;
@@ -46,16 +45,6 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
       ? trendRaw.map((point) => ({ label: point.bulan, value: point.masuk, secondaryValue: point.keluar }))
       : [];
 
-  const { data: deliveriesResult, error: deliveriesError } = useSWR(
-    'dashboard-deliveries-preview',
-    () => deliveriesApi.list({ pageSize: 3 }),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
-  );
-  const deliveries = deliveriesResult?.data ?? [];
-
-  // "Perlu Perhatian": gantikan widget "Table List" lama (lihat catatan di
-  // AttentionPanel.tsx kenapa) — dua hal yang butuh tindakan admin hari
-  // ini, bukan cuma riwayat pasif.
   const {
     data: lowStockResult,
     error: lowStockError,
@@ -65,19 +54,10 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
     () => itemsApi.list({ stok_menipis: 1, pageSize: 5 }),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
-  const {
-    data: pendingPOResult,
-    error: pendingPOError,
-    isLoading: pendingPOLoading,
-  } = useSWR(
-    'dashboard-pending-po',
-    () => purchaseOrdersApi.list({ status: 'diajukan', pageSize: 5 }),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
-  );
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
+      <div className="grid grid-cols-1 gap-4">
         <Reveal index={0}>
           <TrendChartCard
             title="Tren Barang Masuk &amp; Keluar"
@@ -88,9 +68,18 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
             errorMessage={listErrorMessage(trendError)}
           />
         </Reveal>
-        <Reveal index={1}>
-          <DeliveryTrackingCard deliveries={deliveries} errorMessage={listErrorMessage(deliveriesError)} />
-        </Reveal>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        {stats === null ? (
+          <p className="col-span-full text-xs text-dangerText">
+            {listErrorMessage(summaryError)}
+          </p>
+        ) : (
+          stats.map((stat, index) => (
+            <StatCard key={stat.id} index={index} label={stat.label} value={stat.value} />
+          ))
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
@@ -99,16 +88,13 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
             lowStockItems={lowStockResult?.data ?? []}
             lowStockLoading={lowStockLoading}
             lowStockError={listErrorMessage(lowStockError)}
-            pendingPOs={pendingPOResult?.data ?? []}
-            pendingPOLoading={pendingPOLoading}
-            pendingPOError={listErrorMessage(pendingPOError)}
           />
         </Reveal>
         <div className="flex flex-col gap-4">
           <Reveal index={1}>
             <Card className="flex flex-col gap-3">
               <div>
-                <h2 className="text-base font-semibold text-text">Traffic Pengiriman</h2>
+                <h2 className="text-base font-semibold text-text">Traffic Barang Masuk &amp; Keluar</h2>
                 <p className="text-xs text-textMuted">Dokumen Barang Masuk & Keluar per status</p>
               </div>
               {summaryError || !summaryRaw ? (
@@ -163,17 +149,9 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
                       {formatCurrency(summaryRaw.kelolaBarang.totalNilaiInventaris)}
                     </span>
                   </li>
-                  <li className="flex items-center justify-between border-b border-dashed border-borderSoft pb-1.5">
+                  <li className="flex items-center justify-between">
                     <span className="text-textMuted">Stock Opname selesai</span>
                     <span className="font-semibold text-text">{summaryRaw.stockOpname.selesai}</span>
-                  </li>
-                  <li className="flex items-center justify-between border-b border-dashed border-borderSoft pb-1.5">
-                    <span className="text-textMuted">Pengiriman dalam perjalanan</span>
-                    <span className="font-semibold text-text">{summaryRaw.pengiriman.dalamPerjalanan}</span>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span className="text-textMuted">Pengiriman terkirim</span>
-                    <span className="font-semibold text-text">{summaryRaw.pengiriman.terkirim}</span>
                   </li>
                 </ul>
               )}
@@ -186,18 +164,6 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
             </Card>
           </Reveal>
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {stats === null ? (
-          <p className="col-span-full text-xs text-dangerText">
-            {listErrorMessage(summaryError)}
-          </p>
-        ) : (
-          stats.map((stat, index) => (
-            <StatCard key={stat.id} index={index} label={stat.label} value={stat.value} />
-          ))
-        )}
       </div>
     </div>
   );

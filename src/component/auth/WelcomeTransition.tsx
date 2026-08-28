@@ -12,17 +12,7 @@ interface WelcomeTransitionProps {
 
 const PARTICLE_COUNT = 14;
 
-/**
- * Layar transisi penuh setelah login berhasil — dirancang MEWAH & ELEGAN
- * mengikuti identitas logo WMS-RSD (hitam pekat + emas), bukan lagi tema
- * gudang bernuansa oranye/kotak-kardus seperti versi sebelumnya: latar
- * hitam pekat dengan vignette emas lembut, partikel emas melayang naik
- * perlahan, garis emas tipis yang "menggambar" diri sendiri di bawah logo,
- * dan tipografi berjarak-huruf lebar khas identitas brand premium.
- * Dipanggil sekali per login lewat flag di sessionStorage (lihat
- * `login/page.tsx` & `dashboard/page.tsx`).
- */
-export function WelcomeTransition({ name, roleLabel, onDone }: WelcomeTransitionProps): React.JSX.Element {
+export function WelcomeTransition({ name, roleLabel, onDone }: Readonly<WelcomeTransitionProps>): React.JSX.Element {
   const [phase, setPhase] = useState<'reveal' | 'greet'>('reveal');
 
   useEffect(() => {
@@ -53,12 +43,11 @@ export function WelcomeTransition({ name, roleLabel, onDone }: WelcomeTransition
       exit={{ opacity: 0, scale: 1.03 }}
       transition={{ duration: 0.6, ease: 'easeInOut' }}
     >
-      {/* Vignette emas lembut di belakang logo */}
+
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(212,160,74,0.16)_0%,rgba(212,160,74,0)_70%)]" />
-      {/* Vignette gelap di tepi layar supaya fokus tetap ke tengah */}
+
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(0,0,0,0.75)_100%)]" />
 
-      {/* Partikel emas melayang naik perlahan */}
       {particles.map((p) => (
         <span
           key={p.id}
@@ -97,7 +86,7 @@ export function WelcomeTransition({ name, roleLabel, onDone }: WelcomeTransition
                 priority
                 className="block h-auto w-52 select-none sm:w-64"
               />
-              {/* Sapuan cahaya emas melintasi logo, sekali saja (bukan loop terus-terusan — lebih elegan) */}
+
               <motion.div
                 className="pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent"
                 initial={{ x: '-120%', skewX: -12 }}
@@ -106,7 +95,6 @@ export function WelcomeTransition({ name, roleLabel, onDone }: WelcomeTransition
               />
             </motion.div>
 
-            {/* Garis emas tipis yang "menggambar diri sendiri" */}
             <motion.div
               className="h-px bg-gradient-to-r from-transparent via-[#d4a04a] to-transparent"
               initial={{ width: 0, opacity: 0 }}

@@ -8,11 +8,6 @@ interface AnimatedNumberProps {
   duration?: number;
 }
 
-/**
- * Menampilkan angka dengan animasi "menghitung naik" dari 0 ke nilai akhir.
- * Jika `value` mengandung karakter non-angka (mis. "Rp 12.000.000",
- * "540 unit"), prefix/suffix di sekitar angka tetap dipertahankan.
- */
 export function AnimatedNumber({ value, duration = 1.1 }: AnimatedNumberProps): React.JSX.Element {
   const raw = String(value);
   const match = raw.match(/-?\d[\d.,]*/);

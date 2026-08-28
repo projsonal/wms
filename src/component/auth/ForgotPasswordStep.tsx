@@ -8,6 +8,7 @@ import { authApi } from '@/lib/api/auth';
 import { HttpError } from '@/lib/api/client';
 import { Icon } from "@iconify/react";
 
+
 interface ForgotPasswordStepProps {
   initialIdentifier?: string;
   onBackToLogin: () => void;
@@ -41,7 +42,7 @@ export function ForgotPasswordStep({
       return;
     }
     if (!humanCheckToken) {
-      setError('Tunggu proses verifikasi "kamu bukan robot" selesai dulu.');
+      setError('Tunggu proses verifikasi "kamu bukan robot" selesai terlebehi dulu.');
       return;
     }
     setIsSubmitting(true);
@@ -54,7 +55,7 @@ export function ForgotPasswordStep({
       });
       setPhase('done');
     } catch (err) {
-      setError(err instanceof HttpError ? err.message : 'Gagal menyimpan password baru, coba lagi.');
+      setError(err instanceof HttpError ? err.message : 'Gagal menyimpan password baru, silakan cek apakah udah sama passwordnya kemudian coba lagi.');
       setHumanCheckToken(null);
       setResetKey((k) => k + 1);
     } finally {
@@ -104,12 +105,9 @@ export function ForgotPasswordStep({
           Ganti Password
         </Button>
         <button type="button" onClick={onBackToLogin} className="text-xs text-textMuted underline">
-          <Icon
-            icon="lucide:arrow-left"
-            className="h-4 w-4"
-            aria-hidden="true"
-            />
-            Kembali ke halaman masuk
+            <Icon icon="ep:success-filled"
+            className="h-5 w-5"
+            aria-hidden="true"></Icon>
         </button>
       </div>
     );
@@ -118,7 +116,9 @@ export function ForgotPasswordStep({
   return (
     <div className="flex flex-col items-center gap-3 py-4 text-center">
       <span className="flex h-14 w-14 items-center justify-center rounded-full bg-successBg text-2xl text-successText">
-        ✓
+        <Icon icon="lucide:success-filled"
+            className="h-5 w-5"
+            aria-hidden="true"></Icon>
       </span>
       <h2 className="text-base font-semibold text-text">Password Berhasil Diubah</h2>
       <p className="text-xs text-textMuted">Silakan masuk kembali menggunakan password barumu.</p>

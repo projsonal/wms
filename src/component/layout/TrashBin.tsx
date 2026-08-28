@@ -16,14 +16,6 @@ const TYPE_LABEL: Record<TrashItem['type'], string> = {
   barang_rusak: 'Barang Rusak',
 };
 
-/**
- * Ikon Tempat Sampah — dipasang SEKALI di Header.tsx (global, tampil di
- * SEMUA halaman), TAPI cuma dirender untuk Super Admin & Admin (backend
- * juga membatasi GET/POST/DELETE /trash ke 2 role ini — lihat
- * internal/controller/trash). Mencakup data yang dihapus dari 4 modul:
- * Aset Gudang, Barang, Gudang, Barang Rusak (lihat DeletedAt di
- * model masing-masing) — bukan literal semua tabel di sistem.
- */
 export function TrashBin(): React.JSX.Element | null {
   const { user } = useAuth();
   const confirm = useConfirm();
@@ -91,6 +83,49 @@ export function TrashBin(): React.JSX.Element | null {
     return null;
   }
 
+  let itemsContent: React.ReactNode;
+  if (isLoading) {
+    itemsContent = <p className="px-4 py-6 text-center text-xs text-textMuted">Memuat...</p>;
+  } else if (!items || items.length === 0) {
+    itemsContent = <p className="px-4 py-6 text-center text-xs text-textMuted">Tempat sampah kosong.</p>;
+  } else {
+    itemsContent = items.map((item) => {
+      const key = `${item.type}-${item.id}`;
+      const busy = busyKey === key;
+      return (
+        <div key={key} className="flex items-center justify-between gap-2 border-b border-borderSoft px-4 py-3 last:border-0">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-semibold text-text">{item.judul}</p>
+            <p className="text-[10px] text-textMuted">
+              {TYPE_LABEL[item.type]}
+              {item.subjudul ? ` · ${item.subjudul}` : ''} · dihapus {formatDate(item.deletedAt)}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleRestore(item)}
+              disabled={busy}
+              title="Pulihkan"
+              className="rounded p-1.5 text-textMuted hover:bg-successBg hover:text-successText disabled:opacity-50"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePurge(item)}
+              disabled={busy}
+              title="Hapus Permanen"
+              className="rounded p-1.5 text-textMuted hover:bg-dangerBg hover:text-dangerText disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      );
+    });
+  }
+
   return (
     <div className="relative">
       <button
@@ -109,7 +144,12 @@ export function TrashBin(): React.JSX.Element | null {
 
       {isOpen ? (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <button
+            type="button"
+            aria-label="Tutup tempat sampah"
+            className="fixed inset-0 z-40 cursor-default"
+            onClick={() => setIsOpen(false)}
+          />
           <div className="absolute right-0 top-full z-50 mt-2 w-96 max-w-[92vw] rounded-lg border border-borderSoft bg-surface shadow-card">
             <div className="flex items-center justify-between border-b border-borderSoft px-4 py-3">
               <h3 className="text-sm font-bold text-text">Tempat Sampah</h3>
@@ -118,47 +158,7 @@ export function TrashBin(): React.JSX.Element | null {
               </button>
             </div>
             <div className="max-h-96 overflow-y-auto">
-              {isLoading ? (
-                <p className="px-4 py-6 text-center text-xs text-textMuted">Memuat...</p>
-              ) : !items || items.length === 0 ? (
-                <p className="px-4 py-6 text-center text-xs text-textMuted">Tempat sampah kosong.</p>
-              ) : (
-                items.map((item) => {
-                  const key = `${item.type}-${item.id}`;
-                  const busy = busyKey === key;
-                  return (
-                    <div key={key} className="flex items-center justify-between gap-2 border-b border-borderSoft px-4 py-3 last:border-0">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-text">{item.judul}</p>
-                        <p className="text-[10px] text-textMuted">
-                          {TYPE_LABEL[item.type]}
-                          {item.subjudul ? ` · ${item.subjudul}` : ''} · dihapus {formatDate(item.deletedAt)}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleRestore(item)}
-                          disabled={busy}
-                          title="Pulihkan"
-                          className="rounded p-1.5 text-textMuted hover:bg-successBg hover:text-successText disabled:opacity-50"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handlePurge(item)}
-                          disabled={busy}
-                          title="Hapus Permanen"
-                          className="rounded p-1.5 text-textMuted hover:bg-dangerBg hover:text-dangerText disabled:opacity-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
+              {itemsContent}
             </div>
           </div>
         </>

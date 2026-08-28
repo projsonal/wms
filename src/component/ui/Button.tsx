@@ -6,8 +6,7 @@ type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
-  /** Saat true: tombol dinonaktifkan & konten diganti indikator 3 titik
-   * (dipakai untuk tombol Masuk/Daftar selagi request ke server berjalan). */
+
   loading?: boolean;
 }
 

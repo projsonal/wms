@@ -30,7 +30,6 @@ import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 const EMPTY_FORM: Partial<DeliveryPayload> = { jenisPengambilan: 'pickup' };
 const BANDUNG_CENTER = { lat: -6.9175, lng: 107.6191 };
 
-
 export function PickupDropoffContent(): React.JSX.Element {
   const { user } = useAuth();
   const isStaff = user?.role === 'super_admin' || user?.role === 'admin';
@@ -144,12 +143,6 @@ export function PickupDropoffContent(): React.JSX.Element {
     }
   }
 
-  // "Mulai Perjalanan": SATU-SATUNYA cara mencapai status "Dalam
-  // Perjalanan" — backend HANYA menerima ping GPS kurir (POST
-  // /pengiriman/:id/lokasi) selama status persis ini (lihat catatan di
-  // pengiriman_controller.go KirimLokasi). Tanpa tombol ini, live
-  // tracking GPS tidak akan pernah bisa diuji sama sekali karena status
-  // pengiriman tidak akan pernah mencapai "Dalam Perjalanan" dari UI.
   async function handleMulai(row: Delivery): Promise<void> {
     try {
       await deliveriesApi.mulai(row.id);
@@ -247,12 +240,6 @@ export function PickupDropoffContent(): React.JSX.Element {
     }
   }
 
-  // Jarak & estimasi waktu dihitung LANGSUNG di sini (garis lurus/haversine,
-  // tanpa request jaringan — lihat catatan panjang di lib/utils/geo.ts
-  // kenapa bukan rute jalan OSRM asli seperti di halaman Detail
-  // Pengiriman) dari koordinat gudang asal & tujuan, BUKAN dari
-  // `row.distanceKm` backend yang statis/tidak pernah ter-update —
-  // itulah sebabnya kolom Jarak sebelumnya selalu menampilkan "0 km".
   function estimatedDistanceKm(row: Delivery): number | null {
     if (
       row.originLatitude === undefined ||
@@ -361,7 +348,7 @@ export function PickupDropoffContent(): React.JSX.Element {
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-3">
-          <Link href={`/home/delivery/${row.id}`} className="text-xs font-semibold text-accent hover:underline">
+          <Link href={`/delivery/${row.id}`} className="text-xs font-semibold text-accent hover:underline">
             Lihat detail
           </Link>
           <button

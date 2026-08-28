@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { ROLE_LABEL } from '@/auth/roles';
 import { BoxIcon, ForkliftIcon, PalletIcon, ShelfIcon } from '@/component/ui/WarehouseIcons';
 import type { UserRole } from '@/types';
+import { Icon } from "@iconify/react";
 
 interface WelcomeBannerProps {
   fullName: string;
@@ -12,9 +13,9 @@ interface WelcomeBannerProps {
 }
 
 const ROLE_SUBTITLE: Record<UserRole, string> = {
-  super_admin: 'Semua modul gudang & inventaris ada dalam kendali kamu hari ini.',
+  super_admin: 'Silakan kelola barang, user, monitoring aset barang.',
   admin: 'Operasional gudang, stok, dan laporan menanti untuk dikelola.',
-  karyawan: 'Semangat kerja hari ini — cek tugas dan pengiriman kamu di bawah.',
+  karyawan: 'Semangat kerja hari ini, cek barang ataupun tambah barang.',
 };
 
 function formatDate(date: Date): string {
@@ -30,19 +31,11 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
-/**
- * Kartu sapaan animasi di puncak dashboard — "Selamat datang, {nama}"
- * lengkap dengan jam berjalan & dekorasi bertema pergudangan (forklift,
- * pallet, rak, kotak) yang melayang pelan di latar.
- */
-export function WelcomeBanner({ fullName, role }: WelcomeBannerProps): React.JSX.Element {
+export function WelcomeBanner({ fullName, role }: Readonly<WelcomeBannerProps>): React.JSX.Element {
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
-    // Waktu hanya boleh diambil di client (menghindari mismatch SSR), jadi
-    // nilai awal null lalu diisi sekali di sini — bukan pola yang dicegah
-    // aturan react-hooks/set-state-in-effect (bukan reaksi ke state lain).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     setNow(new Date());
     const interval = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(interval);
@@ -57,7 +50,7 @@ export function WelcomeBanner({ fullName, role }: WelcomeBannerProps): React.JSX
       transition={{ type: 'spring', stiffness: 180, damping: 20 }}
       className="relative overflow-hidden rounded-lg bg-gradient-to-r from-sidebarFrom via-accentDark to-accent px-6 py-6 text-white shadow-card sm:px-8"
     >
-      {/* Dekorasi bertema gudang, melayang pelan */}
+
       <BoxIcon className="pointer-events-none absolute -right-2 -top-4 h-24 w-24 text-white/10 animate-wms-float-slow" />
       <ForkliftIcon className="pointer-events-none absolute right-10 bottom-0 hidden h-14 w-24 text-white/10 animate-wms-drift sm:block" />
       <PalletIcon className="pointer-events-none absolute right-56 top-1/2 hidden h-6 w-16 -translate-y-1/2 text-white/10 md:block" />
@@ -86,7 +79,7 @@ export function WelcomeBanner({ fullName, role }: WelcomeBannerProps): React.JSX
               animate={{ rotate: [0, 18, -8, 18, 0] }}
               transition={{ duration: 1.4, delay: 0.6, repeat: Infinity, repeatDelay: 3.5 }}
             >
-              👋
+              <Icon icon="ep:waving-hand-medium-light-skin-tone"></Icon>
             </motion.span>
           </motion.h2>
           <motion.p

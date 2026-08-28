@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { isAssetNotifEnabled, setAssetNotifEnabled, isStockNotifEnabled, setStockNotifEnabled } from '@/lib/notifications-context';
-import { isAutoLogoutEnabled, setAutoLogoutEnabled } from '@/component/system/InactivityLogout';
+import { isAssetNotifEnabled, isStockNotifEnabled } from '@/lib/notifications-context';
+import { isAutoLogoutEnabled } from '@/component/system/InactivityLogout';
+import { isLoginGuideEnabled, setLoginGuideEnabled } from '@/component/system/LoginGuide';
+import { isAutoSyncEnabled, setAutoSyncEnabled } from '@/component/system/AutoSync';
 import clsx from 'clsx';
-import { ChevronDown, CheckCircle2, Wrench } from 'lucide-react';
+import { ChevronDown, CheckCircle2, RefreshCw, DownloadCloud, AlertTriangle } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Card } from '@/component/ui/Card';
 import { Button } from '@/component/ui/Button';
@@ -22,7 +24,7 @@ import { useAuthedImage } from '@/lib/hooks/useAuthedImage';
 import { ROLE_LABEL } from '@/auth/roles';
 import { authApi } from '@/lib/api/auth';
 import { accountApi } from '@/lib/api/account';
-import { maintenanceApi, appInfoApi, type MaintenanceStatus, type AppVersionInfo, type ChangelogEntry } from '@/lib/api/modules';
+import { maintenanceApi, appInfoApi, type MaintenanceStatus, type AppVersionInfo, type CheckUpdateInfo, type SelfUpdateStatus, type SelfUpdateState } from '@/lib/api/modules';
 import { HttpError } from '@/lib/api/client';
 import { formatDate } from '@/lib/utils/format';
 import type { SessionInfo } from '@/types';
@@ -43,13 +45,13 @@ function ToggleRow({
   description,
   checked,
   onChange,
-}: {
+}: Readonly<{
   title: string;
   description: string;
-  /** Kalau diisi, komponen jadi controlled (state dikelola pemanggil). */
+
   checked?: boolean;
   onChange?: (next: boolean) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const [localEnabled, setLocalEnabled] = useState(true);
   const enabled = checked ?? localEnabled;
 
@@ -98,13 +100,13 @@ function ProfileTab(): React.JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sinkronkan form saat data user selesai dimuat
+
     setFullName(user?.fullName ?? '');
-     
+
     setUsername(user?.username ?? '');
-     
+
     setEmail(user?.email ?? '');
-     
+
     setPhoneNumber(user?.phoneNumber ?? '');
   }, [user]);
 
@@ -127,7 +129,7 @@ function ProfileTab(): React.JSX.Element {
 
   async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
-    event.target.value = ''; // supaya bisa pilih file yang sama lagi kalau mau
+    event.target.value = '';
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
       toast.error('Ukuran foto maksimal 2MB.');
@@ -165,7 +167,6 @@ function ProfileTab(): React.JSX.Element {
       <h2 className="text-base font-semibold text-text">Profil</h2>
       <div className="flex items-center gap-4">
         <span className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutralBg">
-          {/* eslint-disable-next-line @next/next/no-img-element -- avatarUrl dari domain backend terpisah; default-avatar.png aset statis lokal, keduanya butuh <img> polos */}
           <img src={avatarUrl ?? '/assets/default-avatar.png'} alt="Foto profil" className="h-full w-full object-cover" />
         </span>
         <div className="flex flex-col gap-1">
@@ -185,9 +186,6 @@ function ProfileTab(): React.JSX.Element {
             >
               Ubah Foto Profil
             </Button>
-            {/* Cuma tampil kalau memang sedang pakai foto (avatarUrl ada) —
-                tidak ada gunanya menawarkan "hapus" kalau sudah avatar
-                inisial default, lihat catatan removeAvatar di account.ts. */}
             {user?.avatarUrl ? (
               <Button
                 type="button"
@@ -213,9 +211,7 @@ function ProfileTab(): React.JSX.Element {
         />
         <Input label="Email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         <Input label="Nomor HP" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} />
-        {/* Role SENGAJA readOnly — tidak bisa diubah lewat form profil sendiri
-            (backend juga menolaknya, lihat UpdateMeRequest di user_controller.go).
-            Perubahan role hanya lewat Manajemen User oleh Super Admin/Admin. */}
+
         <Input label="Role" defaultValue={user ? ROLE_LABEL[user.role] : ''} readOnly disabled />
       </div>
       <div>
@@ -226,24 +222,24 @@ function ProfileTab(): React.JSX.Element {
 }
 
 function NotificationTab(): React.JSX.Element {
-  const [assetNotifEnabled, setAssetNotifEnabledState] = useState(true);
-  const [stockNotifEnabled, setStockNotifEnabledState] = useState(true);
+  const [assetNotifEnabled, setAssetNotifEnabled] = useState(true);
+  const [stockNotifEnabled, setStockNotifEnabled] = useState(true);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- baca preferensi tersimpan sekali saat mount
-    setAssetNotifEnabledState(isAssetNotifEnabled());
-     
-    setStockNotifEnabledState(isStockNotifEnabled());
+
+    setAssetNotifEnabled(isAssetNotifEnabled());
+
+    setStockNotifEnabled(isStockNotifEnabled());
   }, []);
 
   function handleToggleAssetNotif(next: boolean): void {
-    setAssetNotifEnabledState(next);
+    setAssetNotifEnabled(next);
     setAssetNotifEnabled(next);
     toast.success(next ? 'Notifikasi aset diaktifkan.' : 'Notifikasi aset dimatikan.');
   }
 
   function handleToggleStockNotif(next: boolean): void {
-    setStockNotifEnabledState(next);
+    setStockNotifEnabled(next);
     setStockNotifEnabled(next);
     toast.success(next ? 'Peringatan stok minimum diaktifkan.' : 'Peringatan stok minimum dimatikan.');
   }
@@ -288,7 +284,7 @@ function SessionsCard(): React.JSX.Element {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadSessions async, lihat AuthContext untuk pola serupa
+
     loadSessions();
   }, []);
 
@@ -298,9 +294,6 @@ function SessionsCard(): React.JSX.Element {
     try {
       const res = await authApi.revokeSession(id);
       if (res.revokedCurrent) {
-        // Sesi yang sedang dipakai browser ini sendiri baru saja dicabut —
-        // access token yang ada tidak berguna lagi, langsung logout &
-        // kembali ke halaman login.
         toast('Sesi ini baru saja dicabut, kamu akan keluar otomatis.');
         await logout();
         router.push('/login');
@@ -513,7 +506,7 @@ function TwoFactorActivationCard(): React.JSX.Element {
     <Card className="flex flex-col items-center gap-3 text-center">
       <h2 className="text-base font-semibold text-text">Aktifkan Two Factor Authentication</h2>
       <p className="text-xs text-textMuted">
-        Opsional — tambahkan lapisan keamanan kode OTP dari Google Authenticator setiap login.
+        apabila kamu ingin akunnya aman bisa tambah keamanan double dengan menggunakan kode OTP dari Google Authenticator setiap login.
         Kamu bisa aktifkan kapan saja lewat sini.
       </p>
       {error ? <p className="text-xs text-dangerText">{error}</p> : null}
@@ -525,17 +518,26 @@ function TwoFactorActivationCard(): React.JSX.Element {
 }
 
 function SecurityTab(): React.JSX.Element {
-  const [autoLogoutEnabled, setAutoLogoutEnabledState] = useState(true);
+  const [autoLogoutEnabled, setAutoLogoutEnabled] = useState(true);
+  const [loginGuideEnabled, setLoginGuideEnabledState] = useState(true);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- baca preferensi tersimpan sekali saat mount
-    setAutoLogoutEnabledState(isAutoLogoutEnabled());
+
+    setAutoLogoutEnabled(isAutoLogoutEnabled());
+
+    setLoginGuideEnabledState(isLoginGuideEnabled());
   }, []);
 
   function handleToggleAutoLogout(next: boolean): void {
-    setAutoLogoutEnabledState(next);
+    setAutoLogoutEnabled(next);
     setAutoLogoutEnabled(next);
     toast.success(next ? 'Sesi otomatis logout diaktifkan.' : 'Sesi otomatis logout dimatikan.');
+  }
+
+  function handleToggleLoginGuide(next: boolean): void {
+    setLoginGuideEnabledState(next);
+    setLoginGuideEnabled(next);
+    toast.success(next ? 'Panduan setelah login diaktifkan.' : 'Panduan setelah login dimatikan.');
   }
 
   return (
@@ -544,8 +546,10 @@ function SecurityTab(): React.JSX.Element {
         <Card className="flex flex-col gap-1">
           <h2 className="mb-1 text-base font-semibold text-text">Keamanan Akun</h2>
           <ToggleRow
-            title="Notifikasi Login Baru"
-            description="Kirim email saat ada login dari perangkat baru (preferensi lokal)"
+            title="Panduan Setelah Login"
+            description="Tampilkan ringkasan singkat cara mulai memakai aplikasi setiap berhasil login (preferensi lokal)"
+            checked={loginGuideEnabled}
+            onChange={handleToggleLoginGuide}
           />
           <ToggleRow
             title="Sesi Otomatis Logout"
@@ -603,6 +607,225 @@ function AppearanceTab(): React.JSX.Element {
   );
 }
 
+interface CekUpdateSectionProps {
+  isSuperAdmin: boolean;
+  checkUpdateInfo: CheckUpdateInfo;
+  isCheckingUpdate: boolean;
+  checkUpdateError: string | null;
+  isTriggeringUpdate: boolean;
+  isRunning: boolean;
+  onCheckUpdate: () => void;
+  onTriggerUpdate: () => void;
+}
+
+function UpdateActionRow({
+  isSuperAdmin,
+  latestVersion,
+  selfUpdateEnabled,
+  isTriggeringUpdate,
+  isRunning,
+  onTriggerUpdate,
+}: Readonly<{
+  isSuperAdmin: boolean;
+  latestVersion?: string;
+  selfUpdateEnabled: boolean;
+  isTriggeringUpdate: boolean;
+  isRunning: boolean;
+  onTriggerUpdate: () => void;
+}>): React.JSX.Element {
+  if (!isSuperAdmin) {
+    return <p className="text-[11px] text-textMuted">Hubungi Super Admin untuk memperbarui aplikasi.</p>;
+  }
+  if (!selfUpdateEnabled) {
+    return (
+      <p className="flex items-center gap-1.5 text-[11px] text-warningText">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        Fitur &quot;Update Sekarang&quot; belum diaktifkan di server coba lakukan pengecekan.
+      </p>
+    );
+  }
+  return (
+    <div>
+      <Button variant="primary" onClick={onTriggerUpdate} disabled={isTriggeringUpdate || isRunning} className="mt-1">
+        {isTriggeringUpdate ? 'Memulai...' : `Update Sekarang ke ${latestVersion}`}
+      </Button>
+    </div>
+  );
+}
+
+function UpdateStatusCard({ updateStatus }: Readonly<{ updateStatus: SelfUpdateStatus }>): React.JSX.Element {
+  const stateLabel: Record<Exclude<SelfUpdateState, 'idle'>, string> = {
+    running: `Sedang memperbarui ke ${updateStatus.toVersion}...`,
+    success: `Berhasil diperbarui ke ${updateStatus.toVersion}`,
+    failed: `Update ke ${updateStatus.toVersion} gagal`,
+  };
+  const stateIcon: Record<Exclude<SelfUpdateState, 'idle'>, React.JSX.Element> = {
+    running: <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />,
+    success: <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />,
+    failed: <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />,
+  };
+  const stateBg: Record<Exclude<SelfUpdateState, 'idle'>, string> = {
+    running: 'bg-accentSoft/40 text-accentDark',
+    success: 'bg-successBg text-successText',
+    failed: 'bg-dangerBg text-dangerText',
+  };
+  const state = updateStatus.state as Exclude<SelfUpdateState, 'idle'>;
+
+  return (
+    <div className={clsx('flex items-start gap-2 rounded-md border border-borderSoft p-2.5 text-[11px]', stateBg[state])}>
+      {stateIcon[state]}
+      <div className="flex flex-col gap-0.5">
+        <p className="font-semibold">{stateLabel[state]}</p>
+        <p className="text-textMuted">{updateStatus.message}</p>
+      </div>
+    </div>
+  );
+}
+
+function CekUpdateSection({
+  isSuperAdmin,
+  checkUpdateInfo,
+  isCheckingUpdate,
+  checkUpdateError,
+  isTriggeringUpdate,
+  isRunning,
+  onCheckUpdate,
+  onTriggerUpdate,
+}: CekUpdateSectionProps): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-borderSoft p-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex flex-wrap items-center gap-1.5 font-semibold text-accentDark">
+          <DownloadCloud className="h-3.5 w-3.5 shrink-0" />
+          Versi baru tersedia: {checkUpdateInfo.latestVersion}
+        </p>
+        <button
+          type="button"
+          onClick={onCheckUpdate}
+          disabled={isCheckingUpdate || isRunning}
+          className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-accentDark hover:underline disabled:opacity-50"
+        >
+          <RefreshCw className={clsx('h-3 w-3', isCheckingUpdate && 'animate-spin')} />
+          {isCheckingUpdate ? 'Mengecek ulang...' : 'Cek ulang'}
+        </button>
+      </div>
+
+      {checkUpdateError ? (
+        <p className="flex items-center gap-1.5 text-dangerText">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {checkUpdateError}
+        </p>
+      ) : null}
+
+      {checkUpdateInfo.releaseNotes ? (
+        <p className="whitespace-pre-line rounded-md bg-neutralBg p-2 text-[11px] text-textMuted">
+          {checkUpdateInfo.releaseNotes}
+        </p>
+      ) : null}
+      {checkUpdateInfo.releaseUrl ? (
+        <a
+          href={checkUpdateInfo.releaseUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="w-fit text-[11px] font-semibold text-accentDark hover:underline"
+        >
+          Lihat catatan rilis lengkap di GitHub →
+        </a>
+      ) : null}
+      <UpdateActionRow
+        isSuperAdmin={isSuperAdmin}
+        latestVersion={checkUpdateInfo.latestVersion}
+        selfUpdateEnabled={checkUpdateInfo.selfUpdateEnabled}
+        isTriggeringUpdate={isTriggeringUpdate}
+        isRunning={isRunning}
+        onTriggerUpdate={onTriggerUpdate}
+      />
+    </div>
+  );
+}
+
+interface MaintenanceSectionProps {
+  status: MaintenanceStatus | null;
+  message: string;
+  setMessage: (value: string) => void;
+  durationValue: number;
+  setDurationValue: (value: number) => void;
+  durationUnit: 'minutes' | 'hours';
+  setDurationUnit: (value: 'minutes' | 'hours') => void;
+  isSaving: boolean;
+  onToggleMaintenance: (next: boolean) => void;
+  onSubmitMaintenance: (next: boolean) => void;
+}
+
+function MaintenanceSection({
+  status,
+  message,
+  setMessage,
+  durationValue,
+  setDurationValue,
+  durationUnit,
+  setDurationUnit,
+  isSaving,
+  onToggleMaintenance,
+  onSubmitMaintenance,
+}: Readonly<MaintenanceSectionProps>): React.JSX.Element {
+  return (
+    <>
+      <ToggleRow
+        title="Mode Pemeliharaan"
+        description="Nonaktifkan sementara akses non-Super Admin ke seluruh fitur"
+        checked={status?.isActive ?? false}
+        onChange={onToggleMaintenance}
+      />
+      {status?.isActive ? (
+        <div className="flex flex-col gap-3 border-t border-borderSoft pt-4">
+          <div className="grid grid-cols-[1fr_auto] gap-3">
+            <Input
+              label="Pesan untuk user lain"
+              placeholder="Sistem sedang dalam pemeliharaan..."
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+            />
+            <div>
+              <label htmlFor="maintenance-duration" className="mb-1 block text-sm text-text">
+                Estimasi
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  id="maintenance-duration"
+                  type="number"
+                  min={1}
+                  max={durationUnit === 'hours' ? 48 : 2880}
+                  value={durationValue}
+                  onChange={(event) => setDurationValue(Math.max(1, Number(event.target.value)))}
+                  className="w-20 rounded-md border border-borderSoft bg-surface px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
+                />
+                <select
+                  aria-label="Satuan estimasi"
+                  value={durationUnit}
+                  onChange={(event) => setDurationUnit(event.target.value as 'minutes' | 'hours')}
+                  className="rounded-md border border-borderSoft bg-surface px-2 py-2.5 text-sm text-text outline-none focus:border-accent"
+                >
+                  <option value="minutes">Menit</option>
+                  <option value="hours">Jam</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-textMuted">
+            User yang diblokir akan melihat hitung mundur real-time menuju perkiraan waktu selesai
+            di atas, dan otomatis mendapat notifikasi begitu mode ini dimatikan.
+          </p>
+          <div>
+            <Button variant="secondary" onClick={() => onSubmitMaintenance(true)} disabled={isSaving}>
+              Simpan Pesan &amp; Estimasi
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function SystemTab(): React.JSX.Element {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
@@ -611,31 +834,33 @@ function SystemTab(): React.JSX.Element {
   const [durationValue, setDurationValue] = useState(2);
   const [durationUnit, setDurationUnit] = useState<'minutes' | 'hours'>('hours');
   const [isSaving, setIsSaving] = useState(false);
-  const [versionInfo, setVersionInfo] = useState<AppVersionInfo | null>(null);
-  // Changelog inline, TERTUTUP secara default — beda dari sebelumnya yang
-  // langsung navigasi ke halaman /changelog terpisah tiap klik "Lihat
-  // Changelog". Data baru di-fetch saat pertama kali dibuka (lazy), bukan
-  // ikut dimuat bareng versionInfo di atas walau keduanya sama-sama dari
-  // endpoint publik yang sama.
-  const [isChangelogOpen, setIsChangelogOpen] = useState(false);
-  const [changelog, setChangelog] = useState<ChangelogEntry[] | null>(null);
-  const [isLoadingChangelog, setIsLoadingChangelog] = useState(false);
-  const confirm = useConfirm();
+  const [autoSyncEnabled, setAutoSyncEnabledState] = useState(false);
 
-  async function handleToggleChangelog(): Promise<void> {
-    const next = !isChangelogOpen;
-    setIsChangelogOpen(next);
-    if (next && changelog === null) {
-      setIsLoadingChangelog(true);
-      try {
-        setChangelog(await appInfoApi.changelog());
-      } catch {
-        setChangelog([]); // gagal -> tampilkan kosong daripada macet di "Memuat..." selamanya
-      } finally {
-        setIsLoadingChangelog(false);
-      }
-    }
+  useEffect(() => {
+
+    setAutoSyncEnabledState(isAutoSyncEnabled());
+  }, []);
+
+  function handleToggleAutoSync(next: boolean): void {
+    setAutoSyncEnabledState(next);
+    setAutoSyncEnabled(next);
+    toast.success(
+      next
+        ? 'Sinkronisasi otomatis diaktifkan — semua modul akan disegarkan tiap 1 menit.'
+        : 'Sinkronisasi otomatis dimatikan.',
+    );
   }
+
+  const [versionInfo, setVersionInfo] = useState<AppVersionInfo | null>(null);
+
+  const [checkUpdateInfo, setCheckUpdateInfo] = useState<CheckUpdateInfo | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [checkUpdateError, setCheckUpdateError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<SelfUpdateStatus | null>(null);
+  const [isTriggeringUpdate, setIsTriggeringUpdate] = useState(false);
+
+  const [isUpdatePanelOpen, setIsUpdatePanelOpen] = useState(false);
+  const confirm = useConfirm();
 
   async function loadStatus(): Promise<void> {
     try {
@@ -647,22 +872,73 @@ function SystemTab(): React.JSX.Element {
     }
   }
 
+  async function fetchUpdateStatus(): Promise<void> {
+    try {
+      setUpdateStatus(await appInfoApi.updateStatus());
+    } catch {
+      // biarkan null — kartu progres cukup tidak ditampilkan
+    }
+  }
+
+  async function handleCheckUpdate(): Promise<void> {
+    setIsCheckingUpdate(true);
+    setCheckUpdateError(null);
+    try {
+      setCheckUpdateInfo(await appInfoApi.checkUpdate());
+    } catch (err) {
+      setCheckUpdateError(err instanceof HttpError ? err.message : 'Gagal mengecek update.');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  }
+
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadStatus async
+
     loadStatus();
-     
+
     appInfoApi.version().then(setVersionInfo).catch(() => {});
+    fetchUpdateStatus();
+    handleCheckUpdate();
   }, []);
+
+  useEffect(() => {
+    if (updateStatus?.state !== 'running') return;
+    const interval = setInterval(() => {
+      appInfoApi
+        .updateStatus()
+        .then(setUpdateStatus)
+        .catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [updateStatus?.state]);
+
+  async function handleTriggerUpdate(): Promise<void> {
+    if (!checkUpdateInfo?.latestVersion) return;
+    const ok = await confirm({
+      title: `Update ke ${checkUpdateInfo.latestVersion}?`,
+      message:
+        'Server akan masuk Mode Pemeliharaan sementara, mengunduh & memasang versi baru, lalu restart otomatis. Kalau health check gagal, sistem otomatis kembali ke versi sekarang (rollback). Proses ini butuh waktu beberapa menit.',
+      confirmLabel: 'Ya, Update Sekarang',
+      variant: 'danger',
+    });
+    if (!ok) return;
+
+    setIsTriggeringUpdate(true);
+    try {
+      const status = await appInfoApi.triggerUpdate();
+      setUpdateStatus(status);
+      toast.success('Update dimulai di latar belakang, pantau progresnya di bawah.');
+    } catch (err) {
+      toast.error(err instanceof HttpError ? err.message : 'Gagal memulai update.');
+    } finally {
+      setIsTriggeringUpdate(false);
+    }
+  }
 
   async function submitMaintenance(next: boolean): Promise<void> {
     setIsSaving(true);
     try {
-      // estimatedUntil dihitung dari durasi yang diisi super_admin — bisa
-      // dalam menit ATAU jam (lihat selector unit di bawah) — INI yang
-      // jadi sumber hitung mundur real-time di layar blokir (lihat
-      // RoleGuard.tsx MaintenanceBlockedScreen), bukan menebak dari teks
-      // pesan bebas. Pesan default juga otomatis menyebut durasi yang SAMA
-      // supaya teks & hitung mundur selalu konsisten satu sama lain.
+
       const durationMinutes = durationUnit === 'hours' ? durationValue * 60 : durationValue;
       const estimatedUntil = next
         ? new Date(Date.now() + durationMinutes * 60 * 1000).toISOString()
@@ -705,71 +981,27 @@ function SystemTab(): React.JSX.Element {
       <h2 className="mb-2 text-base font-semibold text-text">Sistem</h2>
       <ToggleRow
         title="Sinkronisasi Otomatis"
-        description="Sinkronkan data dengan backend gostock setiap 5 menit"
+        description="Segarkan ulang data di semua modul yang sedang terbuka setiap 1 menit"
+        checked={autoSyncEnabled}
+        onChange={handleToggleAutoSync}
       />
       {isSuperAdmin ? (
-        <>
-          <ToggleRow
-            title="Mode Pemeliharaan"
-            description="Nonaktifkan sementara akses non-Super Admin ke seluruh fitur"
-            checked={status?.isActive ?? false}
-            onChange={handleToggleMaintenance}
-          />
-          {status?.isActive ? (
-            <div className="flex flex-col gap-3 border-t border-borderSoft pt-4">
-              <div className="grid grid-cols-[1fr_auto] gap-3">
-                <Input
-                  label="Pesan untuk user lain"
-                  placeholder="Sistem sedang dalam pemeliharaan..."
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                />
-                <div>
-                  <label htmlFor="maintenance-duration" className="mb-1 block text-sm text-text">
-                    Estimasi
-                  </label>
-                  <div className="flex gap-1.5">
-                    <input
-                      id="maintenance-duration"
-                      type="number"
-                      min={1}
-                      max={durationUnit === 'hours' ? 48 : 2880}
-                      value={durationValue}
-                      onChange={(event) => setDurationValue(Math.max(1, Number(event.target.value)))}
-                      className="w-20 rounded-md border border-borderSoft bg-surface px-3 py-2.5 text-sm text-text outline-none focus:border-accent"
-                    />
-                    <select
-                      aria-label="Satuan estimasi"
-                      value={durationUnit}
-                      onChange={(event) => setDurationUnit(event.target.value as 'minutes' | 'hours')}
-                      className="rounded-md border border-borderSoft bg-surface px-2 py-2.5 text-sm text-text outline-none focus:border-accent"
-                    >
-                      <option value="minutes">Menit</option>
-                      <option value="hours">Jam</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <p className="text-xs text-textMuted">
-                User yang diblokir akan melihat hitung mundur real-time menuju perkiraan waktu selesai
-                di atas, dan otomatis mendapat notifikasi begitu mode ini dimatikan.
-              </p>
-              <div>
-                <Button
-                  variant="secondary"
-                  onClick={() => submitMaintenance(true)}
-                  disabled={isSaving}
-                >
-                  Simpan Pesan &amp; Estimasi
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </>
+        <MaintenanceSection
+          status={status}
+          message={message}
+          setMessage={setMessage}
+          durationValue={durationValue}
+          setDurationValue={setDurationValue}
+          durationUnit={durationUnit}
+          setDurationUnit={setDurationUnit}
+          isSaving={isSaving}
+          onToggleMaintenance={handleToggleMaintenance}
+          onSubmitMaintenance={submitMaintenance}
+        />
       ) : null}
 
       <div className="mt-4 flex flex-col gap-3 border-t border-borderSoft pt-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-text">Versi Aplikasi</p>
             <p className="text-xs text-textMuted">
@@ -782,14 +1014,18 @@ function SystemTab(): React.JSX.Element {
               )}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleToggleChangelog}
-            className="flex items-center gap-1 text-xs font-semibold text-accentDark hover:underline"
-          >
-            {isChangelogOpen ? 'Tutup Changelog' : 'Lihat Changelog'}
-            <ChevronDown className={clsx('h-3.5 w-3.5 transition-transform', isChangelogOpen && 'rotate-180')} />
-          </button>
+
+          {checkUpdateInfo?.updateAvailable ? (
+            <button
+              type="button"
+              onClick={() => setIsUpdatePanelOpen((v) => !v)}
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-accentSoft px-3 py-1.5 text-xs font-semibold text-accentDark hover:bg-accentSoft/80"
+            >
+              <DownloadCloud className="h-3.5 w-3.5" />
+              Update Tersedia: {checkUpdateInfo.latestVersion}
+              <ChevronDown className={clsx('h-3.5 w-3.5 transition-transform', isUpdatePanelOpen && 'rotate-180')} />
+            </button>
+          ) : null}
         </div>
         {versionInfo?.description ? (
           <div className="rounded-md border border-borderSoft bg-neutralBg p-3">
@@ -801,59 +1037,20 @@ function SystemTab(): React.JSX.Element {
           </div>
         ) : null}
 
-        {/* Riwayat pembaruan, TERTUTUP secara default (lihat isChangelogOpen).
-            Halaman /changelog terpisah tetap ada & masih bisa diakses
-            langsung (mis. dari luar aplikasi), ini cuma tambahan supaya
-            tidak perlu pindah halaman dari Settings. */}
-        {isChangelogOpen ? (
-          <div className="flex flex-col gap-3 rounded-md border border-borderSoft p-3">
-            {(() => {
-              if (isLoadingChangelog) {
-                return <p className="text-xs text-textMuted">Memuat riwayat pembaruan...</p>;
-              }
-              if (!changelog || changelog.length === 0) {
-                return <p className="text-xs text-textMuted">Riwayat pembaruan belum tersedia.</p>;
-              }
-              return changelog.map((entry, index) => (
-                <div key={entry.version} className="border-b border-dashed border-borderSoft pb-3 last:border-0 last:pb-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-bold text-text">{entry.version}</p>
-                    {index === 0 ? (
-                      <span className="rounded-full bg-accentSoft px-2 py-0.5 text-[10px] font-semibold uppercase text-accentDark">
-                        Terbaru
-                      </span>
-                    ) : null}
-                    <span className="text-[11px] text-textMuted">{entry.date}</span>
-                  </div>
-                  {entry.changes.new && entry.changes.new.length > 0 ? (
-                    <div className="mt-1.5 flex flex-col gap-0.5">
-                      <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-successText">
-                        <CheckCircle2 className="h-3 w-3" /> Baru
-                      </p>
-                      <ul className="pl-4 text-xs text-text">
-                        {entry.changes.new.map((item) => (
-                          <li key={item} className="list-disc">{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {entry.changes.fix && entry.changes.fix.length > 0 ? (
-                    <div className="mt-1.5 flex flex-col gap-0.5">
-                      <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-warningText">
-                        <Wrench className="h-3 w-3" /> Perbaikan
-                      </p>
-                      <ul className="pl-4 text-xs text-text">
-                        {entry.changes.fix.map((item) => (
-                          <li key={item} className="list-disc">{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-              ));
-            })()}
-          </div>
+        {isUpdatePanelOpen && checkUpdateInfo?.updateAvailable ? (
+          <CekUpdateSection
+            isSuperAdmin={isSuperAdmin}
+            checkUpdateInfo={checkUpdateInfo}
+            isCheckingUpdate={isCheckingUpdate}
+            checkUpdateError={checkUpdateError}
+            isTriggeringUpdate={isTriggeringUpdate}
+            isRunning={updateStatus?.state === 'running'}
+            onCheckUpdate={handleCheckUpdate}
+            onTriggerUpdate={handleTriggerUpdate}
+          />
         ) : null}
+
+        {updateStatus && updateStatus.state !== 'idle' ? <UpdateStatusCard updateStatus={updateStatus} /> : null}
       </div>
     </Card>
   );

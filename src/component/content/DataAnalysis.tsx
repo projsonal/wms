@@ -20,11 +20,11 @@ function RankingCard({
   title,
   items,
   unit,
-}: {
+}: Readonly<{
   title: string;
   items: Array<{ name: string; value: number }>;
   unit: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <Card className="flex flex-col gap-4">
       <h2 className="text-base font-semibold text-text">{title}</h2>
@@ -49,18 +49,15 @@ function RankingCard({
   );
 }
 
-/** Daftar peringkat sederhana (bukan donut) — dipakai untuk "Aset per
- * Gudang" karena jumlah gudang bisa banyak & label gudang bisa panjang,
- * kurang cocok jadi donut chart yang legend-nya terbatas ruang. */
 function BreakdownList({
   title,
   items,
   emptyMessage,
-}: {
+}: Readonly<{
   title: string;
   items: Array<{ label: string; value: number }>;
   emptyMessage: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const total = items.reduce((sum, item) => sum + item.value, 0);
   return (
     <Card className="flex flex-col gap-4">
@@ -133,11 +130,6 @@ export function DataAnalysisContent(): React.JSX.Element {
         </div>
       </div>
 
-      {/* --- Analisa Aset Perusahaan --- terpisah dari analisa barang di
-          atas karena memang dua jenis data yang beda sifat: barang = stok
-          consumable yang keluar-masuk terus, aset = infrastruktur
-          (tiang/ODC/ONT/ODP/OLT/transportasi) yang dipasang & dipantau
-          kondisinya, lihat menu Manajemen Aset Gudang. */}
       <div className="mt-2">
         <h2 className="mb-3 text-base font-semibold text-text">Analisa Aset Perusahaan</h2>
         <StatsRow

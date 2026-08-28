@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
-import { RefreshCw, X, Pencil, Trash2, Network, History, AlertTriangle, BellRing, BellOff, Radio, MapPinned, Boxes, Users } from 'lucide-react';
+import { X, Pencil, Trash2, Network, History, AlertTriangle, BellRing, BellOff, Radio, MapPinned, Boxes, Users, Menu, Map as MapIcon, List } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Card } from '@/component/ui/Card';
 import { Badge } from '@/component/ui/Badge';
 import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
-import { ASSET_STATUS_META, PING_STATUS_META } from '@/lib/utils/status';
+import { ASSET_STATUS_META } from '@/lib/utils/status';
+import { resolveGudangLabel } from '@/lib/utils/gudang-labels';
 import { assetsApi, assetPortApi, assetHistoryApi, itemsApi, type AssetMapPoint, type AssetPortItem, type AssetHistoryEntry } from '@/lib/api/modules';
 import { friendlyError } from '@/lib/utils/errors';
 import type { JenisAset, AssetStatus } from '@/types';
@@ -20,21 +21,8 @@ const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer)
 const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
 const Tooltip = dynamic(() => import('react-leaflet').then((m) => m.Tooltip), { ssr: false });
 const Polyline = dynamic(() => import('react-leaflet').then((m) => m.Polyline), { ssr: false });
+const ZoomControl = dynamic(() => import('react-leaflet').then((m) => m.ZoomControl), { ssr: false });
 
-/**
- * Peta Leaflet/OpenStreetMap (open source, gratis) menampilkan seluruh
- * titik aset berkoordinat. UX terinspirasi referensi Fibero (panel layer
- * kiri, legenda status, panel detail saat klik titik, garis penghubung
- * antar node) — TAPI disesuaikan ke skema data aplikasi ini (bukan sistem
- * pelanggan/port ISP seperti referensi; garis penghubungnya dari tiap
- * aset ke GUDANG pemiliknya, karena skema saat ini belum punya relasi
- * hierarki aset-ke-aset/pelanggan-ke-port).
- *
- * PENTING: tampilan MARKER (warna & singkatan per jenis aset di
- * JENIS_MARKER_META) SENGAJA TIDAK diubah sesuai permintaan eksplisit —
- * semua penambahan di bawah ini (panel layer, filter status, panel
- * detail, garis kabel) murni logika DI SEKITAR marker yang sudah ada.
- */
 const JENIS_MARKER_META: Record<string, { abbr: string; color: string; label: string }> = {
   tiang: { abbr: 'TG', color: '#78350f', label: 'Tiang' },
   odc: { abbr: 'ODC', color: '#b5451b', label: 'ODC' },
@@ -48,27 +36,16 @@ const JENIS_MARKER_META: Record<string, { abbr: string; color: string; label: st
 const JENIS_URUTAN: JenisAset[] = ['tiang', 'odc', 'ont', 'odp', 'olt'];
 const STATUS_URUTAN: AssetStatus[] = ['aktif', 'rusak', 'nonaktif'];
 
-/**
- * Label marker: "[nama gudang](kantor pusat/cabang) - RSD - [no urut]"
- * mis. "mahang(kantor pusat) - RSD - 001". Diturunkan dari `labelRsd` yang
- * sudah dibuat backend dengan format "{KODE_GUDANG}-RSD-{no urut}".
- */
 function formatMarkerLabel(point: AssetMapPoint): string {
-  const match = point.labelRsd.match(/-RSD-(\d+)$/i);
+  const match = new RegExp(/-RSD-(\d+)$/i).exec(point.labelRsd);
   const noUrut = match ? match[1] : point.labelRsd;
   const tipeLabel = point.gudangTipe === 'pusat' ? 'kantor pusat' : 'kantor cabang';
   return `${point.gudangNama.toLowerCase()}(${tipeLabel}) - RSD - ${noUrut}`;
 }
 
-/**
- * Bunyi alarm singkat pakai Web Audio API (osilator), TANPA butuh file
- * audio eksternal — dua nada pendek naik-turun meniru bip alarm
- * monitoring jaringan. Dibungkus try/catch karena AudioContext bisa
- * gagal di beberapa browser/kondisi (mis. belum ada interaksi user).
- */
 function playAlarmBeep(): void {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- webkitAudioContext fallback Safari lama
+
     const Ctx: any = window.AudioContext || (window as any).webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
@@ -103,31 +80,22 @@ function AssetTrackingMapBody(): React.JSX.Element {
   const [visibleJenis, setVisibleJenis] = useState<Set<JenisAset>>(new Set(JENIS_URUTAN));
   const [statusFilter, setStatusFilter] = useState<AssetStatus | null>(null);
   const [showCable, setShowCable] = useState(true);
+
+  const [viewMode, setViewMode] = useState<'peta' | 'sederhana'>('peta');
+
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedPoint, setSelectedPoint] = useState<AssetMapPoint | null>(null);
   const [showPortPanel, setShowPortPanel] = useState(false);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
-  const [pingingId, setPingingId] = useState<number | null>(null);
-  // Alarm ala "The Dude": daftar aset yang lagi down (pingStatus
-  // 'offline') ditampilkan di panel terpisah + bunyi alarm singkat saat
-  // ADA aset yang BARU SAJA turun (bukan tiap render, biar tidak berisik
-  // untuk aset yang memang sudah lama down). `alarmMuted` supaya operator
-  // bisa mematikan bunyinya tanpa kehilangan indikator visualnya.
+
   const [alarmMuted, setAlarmMuted] = useState(false);
   const knownDownIdsRef = useRef<Set<number> | null>(null);
-  // Status Live: jam berjalan (mirip "STATUS · LIVE 12:04" ala Fibero) +
-  // total SKU barang gudang (dari modul Kelola Barang, BUKAN aset
-  // jaringan) — dua-duanya dipakai widget Live Status di bawah, lihat
-  // catatan lengkap di JSX-nya.
+
   const [liveClock, setLiveClock] = useState('');
   const [totalBarang, setTotalBarang] = useState<number | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tipe Leaflet.DivIcon, hanya tersedia lewat dynamic import di client
+
   const [leafletIcons, setLeafletIcons] = useState<Record<string, any> | null>(null);
-  // Varian ikon KHUSUS untuk aset yang sedang down (pingStatus 'offline')
-  // — cincin bayangan merah berdenyut (animate-wms-alarm-pulse) + tepi
-  // merah, meniru indikator alarm ala monitoring The Dude/MikroTik. Warna
-  // & singkatan dasar per jenis aset TETAP SAMA (lihat catatan di atas),
-  // ini cuma overlay peringatan di sekitarnya.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sama seperti leafletIcons
+
   const [leafletIconsDown, setLeafletIconsDown] = useState<Record<string, any> | null>(null);
 
   useEffect(() => {
@@ -151,9 +119,9 @@ function AssetTrackingMapBody(): React.JSX.Element {
           popupAnchor: [0, -17],
         });
       });
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- inisialisasi ikon sekali setelah leaflet ter-import di client
+
       setLeafletIcons(icons);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sama seperti di atas
+
       setLeafletIconsDown(iconsDown);
     });
   }, []);
@@ -170,11 +138,6 @@ function AssetTrackingMapBody(): React.JSX.Element {
     }
   }
 
-  // Refresh senyap (tanpa spinner isLoading) dipakai polling berkala —
-  // backend sudah punya scheduler ping otomatis (lihat
-  // StartAutoPingScheduler di gowms), jadi halaman ini cukup menarik
-  // ulang datanya secara berkala supaya status online/offline & alarm
-  // ter-update sendiri tanpa operator harus refresh manual.
   async function refreshPointsSilently(): Promise<void> {
     try {
       const res = await assetsApi.map();
@@ -186,13 +149,10 @@ function AssetTrackingMapBody(): React.JSX.Element {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadPoints async
+
     loadPoints();
   }, []);
 
-  // Monitoring kontinu sisi frontend: polling tiap 20 detik supaya
-  // marker & panel alarm di halaman ini ikut ter-update walau operator
-  // tidak menekan apa pun — melengkapi sweep ping otomatis di backend.
   useEffect(() => {
     const interval = window.setInterval(() => {
       refreshPointsSilently();
@@ -200,23 +160,18 @@ function AssetTrackingMapBody(): React.JSX.Element {
     return () => window.clearInterval(interval);
   }, []);
 
-  // Deteksi aset yang BARU SAJA berubah jadi offline dibanding
-  // pembacaan sebelumnya -> bunyikan alarm (kalau tidak di-mute) &
-  // tampilkan toast peringatan. Baseline pertama (knownDownIdsRef masih
-  // null) TIDAK memicu bunyi — supaya tidak "kaget" alarm massal saat
-  // halaman baru dibuka dan sudah ada aset yang lama down.
   useEffect(() => {
     const currentDownIds = new Set(
-      allPoints.filter((p) => p.pingStatus === 'offline').map((p) => p.id),
+      allPoints.filter((p) => p.status === 'rusak').map((p) => p.id),
     );
     if (knownDownIdsRef.current) {
       const newlyDown = allPoints.filter(
-        (p) => p.pingStatus === 'offline' && !knownDownIdsRef.current!.has(p.id),
+        (p) => p.status === 'rusak' && !knownDownIdsRef.current!.has(p.id),
       );
       if (newlyDown.length > 0) {
         if (!alarmMuted) playAlarmBeep();
         newlyDown.forEach((p) => {
-          toast.error(`⚠ ${p.labelRsd} terdeteksi DOWN — cek koneksi/perangkat.`);
+          toast.error(`⚠ ${p.labelRsd} ditandai RUSAK — perlu tindakan.`);
         });
       }
     }
@@ -224,10 +179,8 @@ function AssetTrackingMapBody(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sengaja cuma reaktif ke allPoints; alarmMuted dibaca lewat closure terbaru tiap render
   }, [allPoints]);
 
-  const downPoints = useMemo(() => allPoints.filter((p) => p.pingStatus === 'offline'), [allPoints]);
+  const downPoints = useMemo(() => allPoints.filter((p) => p.status === 'rusak'), [allPoints]);
 
-  // Jam berjalan untuk widget "STATUS · LIVE" — update tiap detik cukup di
-  // client, tidak perlu ke server.
   useEffect(() => {
     function tick(): void {
       setLiveClock(
@@ -239,12 +192,6 @@ function AssetTrackingMapBody(): React.JSX.Element {
     return () => window.clearInterval(id);
   }, []);
 
-  // Total SKU di Kelola Barang — cuma dibutuhkan angkanya (pageSize:1
-  // masih mengembalikan `total` hasil hitung backend), dipakai baris
-  // "Aset Barang" di widget Live Status supaya ikut merepresentasikan
-  // aset PERUSAHAAN secara utuh (bukan cuma perangkat jaringan), sesuai
-  // permintaan. Diambil sekali saat halaman dibuka, bukan tiap polling
-  // 20 detik (stok gudang tidak seperti status ping yang perlu real-time).
   useEffect(() => {
     itemsApi
       .list({ pageSize: 1 })
@@ -252,22 +199,15 @@ function AssetTrackingMapBody(): React.JSX.Element {
       .catch(() => setTotalBarang(null));
   }, []);
 
-  // Metrik ringkas ala "STATUS · LIVE" referensi Fibero, TAPI disesuaikan
-  // ke konsep aset PERUSAHAAN di aplikasi ini (bukan panel ISP pelanggan
-  // internet) — lihat catatan di JSX widget-nya untuk kenapa "Tiket
-  // SLA"/"RADIUS"/"Tagihan" ala referensi TIDAK ditiru mentah-mentah:
-  // modul itu tidak ada di WMS-RSD, jadi diganti ukuran yang benar-benar
-  // dipunyai aplikasi ini.
   const liveStats = useMemo(() => {
     const totalPelangganPort = allPoints.reduce((sum, p) => sum + (p.portTerisi ?? 0), 0);
-    const assetsWithIp = allPoints.filter((p) => p.ipAddress);
-    const onlineCount = assetsWithIp.filter((p) => p.pingStatus === 'online').length;
-    const konektivitasPct = assetsWithIp.length > 0 ? (onlineCount / assetsWithIp.length) * 100 : null;
+
+    const aktifCount = allPoints.filter((p) => p.status === 'aktif').length;
+    const aktifPct = allPoints.length > 0 ? (aktifCount / allPoints.length) * 100 : null;
     return {
       totalPeta: allPoints.length,
       totalPelangganPort,
-      konektivitasPct,
-      assetsWithIpCount: assetsWithIp.length,
+      aktifPct,
     };
   }, [allPoints]);
 
@@ -279,9 +219,6 @@ function AssetTrackingMapBody(): React.JSX.Element {
     [allPoints, visibleJenis, statusFilter],
   );
 
-  // Hitung per-jenis & per-status untuk panel layer/legenda — dari
-  // SELURUH titik (allPoints), bukan yang sudah difilter, supaya angkanya
-  // tidak "menghilang" saat sebuah layer disembunyikan.
   const countByJenis = useMemo(() => {
     const counts: Partial<Record<JenisAset, number>> = {};
     allPoints.forEach((p) => {
@@ -307,26 +244,6 @@ function AssetTrackingMapBody(): React.JSX.Element {
     });
   }
 
-  async function handlePing(point: AssetMapPoint): Promise<void> {
-    if (!point.ipAddress) {
-      toast.error('Aset ini belum punya alamat IP — isi dulu lewat form Ubah Aset.');
-      return;
-    }
-    setPingingId(point.id);
-    try {
-      const res = await assetsApi.ping(String(point.id));
-      toast[res.pingStatus === 'online' ? 'success' : 'error'](
-        `${point.labelRsd}: ${res.pingStatus === 'online' ? `Online (${res.rttMs ?? 0}ms)` : 'Offline / tidak merespon'}`,
-      );
-      await loadPoints();
-      setSelectedPoint((prev) => (prev && prev.id === point.id ? { ...prev, pingStatus: res.pingStatus } : prev));
-    } catch (err) {
-      toast.error(friendlyError(err, 'Gagal melakukan ping.'));
-    } finally {
-      setPingingId(null);
-    }
-  }
-
   async function handleDelete(point: AssetMapPoint): Promise<void> {
     const ok = await confirm({
       title: 'Hapus Aset',
@@ -346,7 +263,17 @@ function AssetTrackingMapBody(): React.JSX.Element {
   }
 
   const firstPoint = points[0];
-  const center: [number, number] = firstPoint ? [firstPoint.latitude, firstPoint.longitude] : [-6.9147, 107.6098]; // fallback: Bandung
+  const center: [number, number] = firstPoint ? [firstPoint.latitude, firstPoint.longitude] : [-6.9147, 107.6098];
+  let aktifIconClass = 'text-textMuted';
+  if (liveStats.aktifPct !== null) {
+    if (liveStats.aktifPct >= 95) {
+      aktifIconClass = 'text-successText';
+    } else if (liveStats.aktifPct >= 80) {
+      aktifIconClass = 'text-amber-600';
+    } else {
+      aktifIconClass = 'text-dangerText';
+    }
+  }
 
   return (
     <PageShell title="Tracking Aset" breadcrumb="Manajemen / Tracking Aset">
@@ -358,24 +285,16 @@ function AssetTrackingMapBody(): React.JSX.Element {
             label: ASSET_STATUS_META[s].label,
             value: countByStatus[s] ?? 0,
           })),
-          { id: 'down', label: 'Down / Bermasalah', value: downPoints.length },
         ]}
       />
 
-      {/* Panel Alarm — meniru daftar "Down" ala monitoring The Dude
-          (MikroTik): semua aset yang sedang tidak merespon ping,
-          diperbarui otomatis lewat polling di atas + sweep ping berkala
-          di backend. Bunyi alarm hanya untuk transisi BARU jadi down
-          (lihat efek deteksi di atas), tapi daftar ini SELALU tampil
-          selama masih ada aset offline supaya operator tidak perlu
-          menunggu bunyi untuk tahu ada gangguan aktif. */}
       {downPoints.length > 0 ? (
         <div className="mt-4 rounded-lg border border-dangerText/30 bg-dangerBg/60 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-dangerText">
               <AlertTriangle className="h-4 w-4 animate-pulse" />
               <span className="text-sm font-bold">
-                {downPoints.length} aset sedang DOWN — segera cek koneksi/perangkat
+                {downPoints.length} aset berstatus RUSAK — perlu tindak lanjut
               </span>
             </div>
             <button
@@ -403,222 +322,99 @@ function AssetTrackingMapBody(): React.JSX.Element {
                 <span className="flex items-center gap-2">
                   <span className="h-2 w-2 flex-shrink-0 rounded-full bg-dangerText" />
                   <span className="font-semibold text-text">{formatMarkerLabel(p)}</span>
-                  <span className="text-textMuted">({p.ipAddress || 'tanpa IP'})</span>
+                  <span className="text-textMuted">({p.gudangNama})</span>
                 </span>
-                <span className="text-dangerText">Offline</span>
+                <span className="text-dangerText">Rusak</span>
               </button>
             ))}
           </div>
         </div>
       ) : null}
 
-      {/* Widget "STATUS · LIVE" — terinspirasi panel status Fibero (lihat
-          referensi), TAPI baris-barisnya diganti ke ukuran yang benar-benar
-          dipunyai WMS-RSD, bukan ditiru mentah dari referensi ISP: Fibero
-          menampilkan "Tiket · SLA dekat", "RADIUS", "Tagihan" karena itu
-          aplikasi ISP dengan modul tiket/RADIUS-auth/billing pelanggan
-          internet — WMS-RSD TIDAK punya modul-modul itu. Baris yang
-          ditampilkan di sini murni dari data yang sungguh ada:
-            - Peta: total titik aset yang terpetakan (allPoints)
-            - Pelanggan: total PORT TERISI di seluruh ODC/ODP (portTerisi),
-              konsep "pelanggan tersambung" yang memang ada di skema aset
-            - Konektivitas: persentase aset ber-IP yang online (dari sweep
-              ping otomatis, backend & polling 20 detik di atas) — padanan
-              paling jujur untuk "RADIUS 99,7%" referensi (uptime), karena
-              app ini tidak punya server RADIUS sungguhan
-            - Aset Barang: total SKU di Kelola Barang, supaya "aset
-              perusahaan" di sini juga mencakup aset FISIK gudang, bukan
-              cuma perangkat jaringan — sesuai permintaan eksplisit. */}
-      <Card className="mt-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wide text-textMuted">Status · Live</span>
-          <span className="flex items-center gap-1.5 font-mono text-xs text-textMuted">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-successText" />
-            {liveClock}
-          </span>
+      <div className="mt-4 flex items-center gap-1 rounded-full bg-neutralBg p-1 text-xs w-fit">
+        <button
+          type="button"
+          onClick={() => setViewMode('peta')}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 font-semibold transition-colors ${
+            viewMode === 'peta' ? 'bg-accent text-white' : 'text-textMuted hover:text-text'
+          }`}
+        >
+          <MapIcon className="h-3.5 w-3.5" /> Peta
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('sederhana')}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 font-semibold transition-colors ${
+            viewMode === 'sederhana' ? 'bg-accent text-white' : 'text-textMuted hover:text-text'
+          }`}
+        >
+          <List className="h-3.5 w-3.5" /> Sederhana
+        </button>
+      </div>
+
+      {viewMode === 'sederhana' ? (
+
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
+          <HierarchyPanel
+            points={allPoints}
+            selectedId={selectedPoint?.id ?? null}
+            onSelect={(p) => {
+              setSelectedPoint(p);
+              setShowPortPanel(false);
+            }}
+          />
+          <DetailTrackingTable
+            points={allPoints}
+            selectedId={selectedPoint?.id ?? null}
+            onSelect={(p) => {
+              setSelectedPoint(p);
+              setShowPortPanel(false);
+            }}
+          />
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
-            <MapPinned className="h-4 w-4 flex-shrink-0 text-accentDark" />
-            <div className="flex flex-col">
-              <span className="text-[11px] text-textMuted">Peta</span>
-              <span className="text-sm font-bold text-text">{liveStats.totalPeta} titik</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
-            <Users className="h-4 w-4 flex-shrink-0 text-accentDark" />
-            <div className="flex flex-col">
-              <span className="text-[11px] text-textMuted">Pelanggan</span>
-              <span className="text-sm font-bold text-text">{liveStats.totalPelangganPort} tersambung</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
-            <Radio
-              className={`h-4 w-4 flex-shrink-0 ${
-                liveStats.konektivitasPct === null
-                  ? 'text-textMuted'
-                  : liveStats.konektivitasPct >= 95
-                    ? 'text-successText'
-                    : liveStats.konektivitasPct >= 80
-                      ? 'text-amber-600'
-                      : 'text-dangerText'
-              }`}
-            />
-            <div className="flex flex-col">
-              <span className="text-[11px] text-textMuted">Konektivitas</span>
-              <span className="text-sm font-bold text-text">
-                {liveStats.konektivitasPct === null
-                  ? 'Belum ada IP'
-                  : `${liveStats.konektivitasPct.toFixed(1)}%`}
-              </span>
-            </div>
-          </div>
-          <a
-            href="/kelola-barang"
-            className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2 transition-colors hover:border-accent"
-          >
-            <Boxes className="h-4 w-4 flex-shrink-0 text-accentDark" />
-            <div className="flex flex-col">
-              <span className="text-[11px] text-textMuted">Aset Barang</span>
-              <span className="text-sm font-bold text-text">
-                {totalBarang === null ? '—' : `${totalBarang} SKU`}
-              </span>
-            </div>
-          </a>
-        </div>
-      </Card>
+      ) : (
 
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr]">
-        <div className="flex flex-col gap-4">
-          {/* Panel Layer & Status — terinspirasi panel kiri referensi Fibero. */}
-          <Card className="flex flex-col gap-4">
-          <div>
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-textMuted">Layer</h3>
-            <div className="flex flex-col gap-1.5">
-              {JENIS_URUTAN.map((jenis) => {
-                const meta = JENIS_MARKER_META[jenis];
-                const active = visibleJenis.has(jenis);
-                return (
-                  <button
-                    key={jenis}
-                    type="button"
-                    onClick={() => toggleJenis(jenis)}
-                    className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors ${
-                      active ? 'bg-neutralBg text-text' : 'text-textMuted opacity-50 hover:opacity-80'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-bold text-white"
-                        style={{ background: meta.color }}
-                      >
-                        {meta.abbr[0]}
-                      </span>
-                      {meta.label}
-                    </span>
-                    <span className="font-semibold">{countByJenis[jenis] ?? 0}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="border-t border-borderSoft pt-3">
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-textMuted">Status</h3>
-            <div className="flex flex-col gap-1.5">
-              <button
-                type="button"
-                onClick={() => setStatusFilter(null)}
-                className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs ${
-                  statusFilter === null ? 'bg-neutralBg text-text' : 'text-textMuted hover:bg-neutralBg'
-                }`}
-              >
-                <span>Semua Status</span>
-                <span className="font-semibold">{allPoints.length}</span>
-              </button>
-              {STATUS_URUTAN.map((s) => {
-                const meta = ASSET_STATUS_META[s];
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setStatusFilter(s)}
-                    className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs ${
-                      statusFilter === s ? 'bg-neutralBg text-text' : 'text-textMuted hover:bg-neutralBg'
-                    }`}
-                  >
-                    <Badge label={meta.label} variant={meta.variant} />
-                    <span className="font-semibold">{countByStatus[s] ?? 0}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="border-t border-borderSoft pt-3">
-            <label className="flex items-center gap-2 text-xs text-textMuted">
-              <input type="checkbox" checked={showCable} onChange={(e) => setShowCable(e.target.checked)} />
-              Tampilkan garis kabel
-            </label>
-            <div className="mt-2 flex flex-col gap-1 pl-1 text-[11px] text-textMuted">
-              <span className="flex items-center gap-1.5">
-                <span className="h-0.5 w-4 bg-accent" /> Hierarki jaringan (ke aset induk)
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-0.5 w-4 border-t border-dashed border-slate-400" /> Ke gudang (belum ada induk)
-              </span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Panel Hierarki — meniru struktur pohon POP▸OLT▸ODC▸ODP di
-            referensi Fibero, dibangun dari relasi parentAssetId (bukan
-            hardcode) + dikelompokkan per gudang untuk aset yang belum
-            disambungkan ke induk manapun. */}
-        <HierarchyPanel points={allPoints} selectedId={selectedPoint?.id ?? null} onSelect={(p) => { setSelectedPoint(p); setShowPortPanel(false); }} />
-        </div>
-
-        <div className="flex flex-col gap-4">
+        <div className="relative mt-4">
           <Card className="relative z-0 overflow-hidden p-0">
             {leafletIcons ? (
-              <MapContainer center={center} zoom={points.length ? 12 : 6} style={{ height: '560px', width: '100%' }}>
+              <MapContainer
+                center={center}
+                zoom={points.length ? 12 : 6}
+                zoomControl={false}
+                style={{ height: 'calc(100vh - 260px)', minHeight: '520px', width: '100%' }}
+              >
+                <ZoomControl position="bottomright" />
                 <TileLayer
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 />
                 {showCable &&
-                  points
-                    .map((p) => {
-                      // Prioritaskan garis ke ASET INDUK (hierarki jaringan
-                      // sungguhan, mis. ODP -> ODC) kalau ada koordinatnya;
-                      // fallback ke garis ke gudang kalau aset ini belum
-                      // disambungkan ke induk manapun.
-                      const target =
-                        p.parentLatitude != null && p.parentLongitude != null
-                          ? ([p.parentLatitude, p.parentLongitude] as [number, number])
-                          : p.gudangLatitude != null && p.gudangLongitude != null
-                            ? ([p.gudangLatitude, p.gudangLongitude] as [number, number])
-                            : null;
-                      const isHierarki = p.parentLatitude != null && p.parentLongitude != null;
-                      if (!target) return null;
-                      return (
-                        <Polyline
-                          key={`kabel-${p.id}`}
-                          positions={[[p.latitude, p.longitude], target]}
-                          pathOptions={
-                            isHierarki
-                              ? { color: '#b3471f', weight: 2, opacity: 0.8 }
-                              : { color: '#94a3b8', weight: 1.5, dashArray: '4 5', opacity: 0.7 }
-                          }
-                        />
-                      );
-                    })}
+                  points.map((point) => {
+                    let target: { lat: number; lng: number; dashed: boolean } | null = null;
+                    if (point.parentAssetId && point.parentLatitude != null && point.parentLongitude != null) {
+                      target = { lat: point.parentLatitude, lng: point.parentLongitude, dashed: false };
+                    } else if (point.gudangLatitude != null && point.gudangLongitude != null) {
+                      target = { lat: point.gudangLatitude, lng: point.gudangLongitude, dashed: true };
+                    }
+                    if (!target) return null;
+                    return (
+                      <Polyline
+                        key={`cable-${point.id}`}
+                        positions={[[point.latitude, point.longitude], [target.lat, target.lng]]}
+                        pathOptions={{
+                          color: target.dashed ? '#94a3b8' : '#0f766e',
+                          weight: 2,
+                          dashArray: target.dashed ? '4 6' : undefined,
+                        }}
+                      />
+                    );
+                  })}
                 {points.map((point) => (
                   <Marker
                     key={point.id}
                     position={[point.latitude, point.longitude]}
                     icon={
-                      point.pingStatus === 'offline'
+                      point.status === 'rusak'
                         ? (leafletIconsDown?.[point.jenisAset] ?? leafletIcons[point.jenisAset] ?? leafletIcons.tiang)
                         : (leafletIcons[point.jenisAset] ?? leafletIcons.tiang)
                     }
@@ -632,24 +428,173 @@ function AssetTrackingMapBody(): React.JSX.Element {
                   >
                     <Tooltip direction="top" offset={[0, -17]}>
                       {formatMarkerLabel(point)}
-                      {point.pingStatus === 'offline' ? ' — ⚠ DOWN' : ''}
+                      {point.status === 'rusak' ? ' — ⚠ RUSAK' : ''}
                     </Tooltip>
                   </Marker>
                 ))}
               </MapContainer>
             ) : (
-              <div className="flex h-[560px] w-full items-center justify-center bg-surfaceAlt text-sm text-textMuted">
+              <div className="flex items-center justify-center text-sm text-textMuted" style={{ height: '520px' }}>
                 Memuat peta...
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((prev) => !prev)}
+              className="absolute left-3 top-3 z-[1000] flex h-10 w-10 items-center justify-center rounded-md bg-surface text-text shadow-card hover:bg-neutralBg"
+              title={sidebarOpen ? 'Sembunyikan panel' : 'Tampilkan panel'}
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+
+            {sidebarOpen ? (
+              <div className="absolute left-3 top-16 z-[999] flex max-h-[calc(100%-11rem)] w-72 flex-col gap-3 overflow-y-auto rounded-lg bg-surface p-3 shadow-card">
+                <Card className="flex flex-col gap-4 border-0 p-0 shadow-none">
+                  <div>
+                    <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-textMuted">Layer</h3>
+                    <div className="flex flex-col gap-1.5">
+                      {JENIS_URUTAN.map((jenis) => {
+                        const meta = JENIS_MARKER_META[jenis];
+                        const active = visibleJenis.has(jenis);
+                        return (
+                          <button
+                            key={jenis}
+                            type="button"
+                            onClick={() => toggleJenis(jenis)}
+                            className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors ${
+                              active ? 'bg-neutralBg text-text' : 'text-textMuted opacity-50 hover:opacity-80'
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span
+                                className="flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-bold text-white"
+                                style={{ background: meta.color }}
+                              >
+                                {meta.abbr[0]}
+                              </span>
+                              {meta.label}
+                            </span>
+                            <span className="font-semibold">{countByJenis[jenis] ?? 0}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-borderSoft pt-3">
+                    <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-textMuted">Status</h3>
+                    <div className="flex flex-col gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setStatusFilter(null)}
+                        className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs ${
+                          statusFilter === null ? 'bg-neutralBg text-text' : 'text-textMuted hover:bg-neutralBg'
+                        }`}
+                      >
+                        <span>Semua Status</span>
+                        <span className="font-semibold">{allPoints.length}</span>
+                      </button>
+                      {STATUS_URUTAN.map((s) => {
+                        const meta = ASSET_STATUS_META[s];
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setStatusFilter(s)}
+                            className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs ${
+                              statusFilter === s ? 'bg-neutralBg text-text' : 'text-textMuted hover:bg-neutralBg'
+                            }`}
+                          >
+                            <Badge label={meta.label} variant={meta.variant} />
+                            <span className="font-semibold">{countByStatus[s] ?? 0}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-borderSoft pt-3">
+                    <label className="flex items-center gap-2 text-xs text-textMuted">
+                      <input type="checkbox" checked={showCable} onChange={(e) => setShowCable(e.target.checked)} />
+                      Tampilkan garis kabel
+                    </label>
+                    <div className="mt-2 flex flex-col gap-1 pl-1 text-[11px] text-textMuted">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-0.5 w-4 bg-accent" /> Hierarki jaringan (ke aset induk)
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-0.5 w-4 border-t border-dashed border-slate-400" /> Ke gudang (belum ada induk)
+                      </span>
+                    </div>
+                  </div>
+                </Card>
+
+                <HierarchyPanel
+                  points={allPoints}
+                  selectedId={selectedPoint?.id ?? null}
+                  onSelect={(p) => {
+                    setSelectedPoint(p);
+                    setShowPortPanel(false);
+                  }}
+                />
+              </div>
+            ) : null}
+
+            <div className="absolute bottom-3 left-3 right-3 z-[999] flex flex-col gap-3 rounded-lg bg-surface p-3 shadow-card">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wide text-textMuted">Status · Live</span>
+                <span className="flex items-center gap-1.5 font-mono text-xs text-textMuted">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-successText" />
+                  {liveClock}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
+                  <MapPinned className="h-4 w-4 flex-shrink-0 text-accentDark" />
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-textMuted">Peta</span>
+                    <span className="text-sm font-bold text-text">{liveStats.totalPeta} titik</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
+                  <Users className="h-4 w-4 flex-shrink-0 text-accentDark" />
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-textMuted">Pelanggan</span>
+                    <span className="text-sm font-bold text-text">{liveStats.totalPelangganPort} tersambung</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2">
+                  <Radio
+                    className={`h-4 w-4 flex-shrink-0 ${aktifIconClass}`}
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-textMuted">Aset Aktif</span>
+                    <span className="text-sm font-bold text-text">
+                      {liveStats.aktifPct === null ? 'Belum ada aset' : `${liveStats.aktifPct.toFixed(1)}%`}
+                    </span>
+                  </div>
+                </div>
+                <a
+                  href="/kelola-barang"
+                  className="flex items-center gap-2 rounded-md border border-borderSoft px-3 py-2 transition-colors hover:border-accent"
+                >
+                  <Boxes className="h-4 w-4 flex-shrink-0 text-accentDark" />
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-textMuted">Aset Barang</span>
+                    <span className="text-sm font-bold text-text">
+                      {totalBarang === null ? '—' : `${totalBarang} SKU`}
+                    </span>
+                  </div>
+                </a>
+              </div>
+            </div>
           </Card>
 
-          {isLoading ? <p className="text-xs text-textMuted">Memuat titik aset...</p> : null}
+          {isLoading ? <p className="mt-2 text-xs text-textMuted">Memuat titik aset...</p> : null}
         </div>
-      </div>
+      )}
 
-      {/* Panel Detail — muncul saat marker diklik, terinspirasi panel
-          kanan referensi Fibero (nama, alamat, status, aksi cepat). */}
       {selectedPoint ? (
         <Card className="flex flex-col gap-3">
           <div className="flex items-start justify-between">
@@ -674,31 +619,18 @@ function AssetTrackingMapBody(): React.JSX.Element {
               label={ASSET_STATUS_META[selectedPoint.status].label}
               variant={ASSET_STATUS_META[selectedPoint.status].variant}
             />
-            {selectedPoint.ipAddress ? (
-              <Badge
-                label={PING_STATUS_META[selectedPoint.pingStatus ?? 'unknown'].label}
-                variant={PING_STATUS_META[selectedPoint.pingStatus ?? 'unknown'].variant}
-              />
-            ) : null}
           </div>
 
           <div className="grid grid-cols-1 gap-1 text-xs text-textMuted sm:grid-cols-2">
-            <p>Gudang: {selectedPoint.gudangNama} ({selectedPoint.gudangKode})</p>
+            <p>Gudang: {selectedPoint.gudangNama} ({resolveGudangLabel(selectedPoint.gudangKode)})</p>
             <p>Koordinat: {selectedPoint.latitude}, {selectedPoint.longitude}</p>
-            {selectedPoint.ipAddress ? <p>Alamat IP: {selectedPoint.ipAddress}</p> : null}
+            {selectedPoint.merek || selectedPoint.tipe ? (
+              <p>Merek / Tipe: {[selectedPoint.merek, selectedPoint.tipe].filter(Boolean).join(' ')}</p>
+            ) : null}
+            {selectedPoint.kodeBarang ? <p>Kode Barang: <span className="font-mono">{selectedPoint.kodeBarang}</span></p> : null}
           </div>
 
           <div className="flex flex-wrap gap-2 border-t border-borderSoft pt-3">
-            {selectedPoint.ipAddress ? (
-              <button
-                type="button"
-                onClick={() => handlePing(selectedPoint)}
-                disabled={pingingId === selectedPoint.id}
-                className="flex items-center gap-1.5 rounded-md border border-borderSoft px-3 py-1.5 text-xs font-semibold text-text hover:border-accent disabled:opacity-50"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${pingingId === selectedPoint.id ? 'animate-spin' : ''}`} /> Cek Ping
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={() => setShowHistoryPanel((prev) => !prev)}
@@ -732,9 +664,6 @@ function AssetTrackingMapBody(): React.JSX.Element {
             ) : null}
           </div>
 
-          {/* Panel Kelola Port — meniru grid "Port 1..8" di panel detail
-              referensi Fibero: klik satu port untuk sambungkan ke
-              pelanggan ATAU ke aset lain (hierarki jaringan). */}
           {showPortPanel && (selectedPoint.jumlahPort ?? 0) > 0 ? (
             <PortManagementPanel
               asset={selectedPoint}
@@ -754,16 +683,12 @@ export function AssetTrackingMapContent(): React.JSX.Element {
 }
 
 interface TreeNode {
-  point: AssetMapPoint | null; // null = node semu "Gudang" (pengelompokan, bukan aset sungguhan)
+  point: AssetMapPoint | null;
   key: string;
   label: string;
   children: TreeNode[];
 }
 
-/** Bangun pohon dari relasi parentAssetId (flat list -> nested tree).
- * Aset tanpa induk dikelompokkan di bawah node semu per Gudang (supaya
- * tetap ada struktur meski belum ada satu pun relasi induk-anak diisi —
- * mis. saat fitur ini baru mulai dipakai). */
 function buildHierarchyTree(points: AssetMapPoint[]): TreeNode[] {
   const byParent = new Map<number, AssetMapPoint[]>();
   const byId = new Map<number, AssetMapPoint>();
@@ -792,7 +717,7 @@ function buildHierarchyTree(points: AssetMapPoint[]): TreeNode[] {
   return Array.from(byGudang.entries()).map(([gudangId, g]) => ({
     point: null,
     key: `g-${gudangId}`,
-    label: `${g.nama} (${g.kode})`,
+    label: `${g.nama} (${resolveGudangLabel(g.kode)})`,
     children: g.items.map(toNode),
   }));
 }
@@ -806,12 +731,12 @@ function TreeNodeRow({
   depth,
   selectedId,
   onSelect,
-}: {
+}: Readonly<{
   node: TreeNode;
   depth: number;
   selectedId: number | null;
   onSelect: (p: AssetMapPoint) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasChildren = node.children.length > 0;
   const isSelected = node.point ? node.point.id === selectedId : false;
@@ -855,15 +780,100 @@ function TreeNodeRow({
   );
 }
 
+function DetailTrackingTable({
+  points,
+  selectedId,
+  onSelect,
+}: Readonly<{
+  points: AssetMapPoint[];
+  selectedId: number | null;
+  onSelect: (p: AssetMapPoint) => void;
+}>): React.JSX.Element {
+  const sorted = useMemo(
+    () => [...points].sort((a, b) => a.gudangNama.localeCompare(b.gudangNama) || a.nama.localeCompare(b.nama)),
+    [points],
+  );
+
+  if (sorted.length === 0) {
+    return (
+      <Card>
+        <p className="text-xs text-textMuted">Belum ada aset berkoordinat untuk dilacak.</p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-x-auto p-0">
+      <table className="w-full min-w-[760px] text-left text-xs">
+        <thead className="border-b border-borderSoft bg-neutralBg/60 text-[10px] uppercase tracking-wide text-textMuted">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Nama / Label</th>
+            <th className="px-3 py-2 font-semibold">Jenis</th>
+            <th className="px-3 py-2 font-semibold">Status</th>
+            <th className="px-3 py-2 font-semibold">Gudang</th>
+            <th className="px-3 py-2 font-semibold">Merek / Tipe</th>
+            <th className="px-3 py-2 font-semibold">Kode Barang</th>
+            <th className="px-3 py-2 font-semibold">Port</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((p) => {
+            const meta = JENIS_MARKER_META[p.jenisAset];
+            const statusMeta = ASSET_STATUS_META[p.status];
+            const isSelected = p.id === selectedId;
+            return (
+              <tr
+                key={p.id}
+                onClick={() => onSelect(p)}
+                className={`cursor-pointer border-b border-borderSoft/60 transition-colors last:border-b-0 ${
+                  isSelected ? 'bg-neutralBg' : 'hover:bg-neutralBg/60'
+                }`}
+              >
+                <td className="px-3 py-2">
+                  <p className="font-semibold text-text">{p.nama}</p>
+                  <p className="font-mono text-[10px] text-textMuted">{p.labelRsd || '-'}</p>
+                </td>
+                <td className="px-3 py-2">
+                  {meta ? (
+                    <span
+                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                      style={{ background: meta.color }}
+                    >
+                      {meta.label}
+                    </span>
+                  ) : (
+                    p.jenisAset
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  <Badge label={statusMeta.label} variant={statusMeta.variant} />
+                </td>
+                <td className="px-3 py-2 text-textMuted">{p.gudangNama}</td>
+                <td className="px-3 py-2 text-textMuted">
+                  {[p.merek, p.tipe].filter(Boolean).join(' ') || '-'}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px] text-textMuted">{p.kodeBarang || '-'}</td>
+                <td className="px-3 py-2 text-textMuted">
+                  {(p.jumlahPort ?? 0) > 0 ? `${p.portTerisi ?? 0} / ${p.jumlahPort}` : '-'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
 function HierarchyPanel({
   points,
   selectedId,
   onSelect,
-}: {
+}: Readonly<{
   points: AssetMapPoint[];
   selectedId: number | null;
   onSelect: (p: AssetMapPoint) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const tree = useMemo(() => buildHierarchyTree(points), [points]);
 
   return (
@@ -882,21 +892,15 @@ function HierarchyPanel({
   );
 }
 
-/**
- * Grid port meniru panel detail referensi Fibero: kotak kecil per nomor
- * port, warna beda untuk kosong vs terisi. Klik satu port -> form kecil
- * di bawah grid untuk isi pelanggan ATAU sambungkan ke aset lain
- * (hierarki jaringan), atau kosongkan lagi.
- */
 function PortManagementPanel({
   asset,
   allPoints,
   onPortsChanged,
-}: {
+}: Readonly<{
   asset: AssetMapPoint;
   allPoints: AssetMapPoint[];
   onPortsChanged: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const [ports, setPorts] = useState<AssetPortItem[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [editingPort, setEditingPort] = useState<number | null>(null);
@@ -919,7 +923,7 @@ function PortManagementPanel({
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadPorts async
+
     loadPorts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset.id]);
@@ -978,26 +982,29 @@ function PortManagementPanel({
         <p className="text-xs text-textMuted">Memuat port...</p>
       ) : (
         <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
-          {(ports ?? []).map((port) => (
-            <button
-              key={port.portNumber}
-              type="button"
-              onClick={() => openPortEditor(port)}
-              title={port.customerName || port.childAssetLabel || `Port ${port.portNumber} — kosong`}
-              className={`flex flex-col items-center justify-center rounded-md border px-1 py-2 text-[10px] font-semibold transition-colors ${
-                editingPort === port.portNumber
-                  ? 'border-accent bg-accent text-white'
-                  : port.status === 'terisi'
-                    ? 'border-successText/40 bg-successBg text-successText hover:border-accent'
-                    : 'border-borderSoft bg-surface text-textMuted hover:border-accent'
-              }`}
-            >
-              <span>{port.portNumber}</span>
-              <span className="truncate w-full text-center text-[9px]">
-                {port.customerName || port.childAssetLabel || '-'}
-              </span>
-            </button>
-          ))}
+          {(ports ?? []).map((port) => {
+            let portStateClass = 'border-borderSoft bg-surface text-textMuted hover:border-accent';
+            if (editingPort === port.portNumber) {
+              portStateClass = 'border-accent bg-accent text-white';
+            } else if (port.status === 'terisi') {
+              portStateClass = 'border-successText/40 bg-successBg text-successText hover:border-accent';
+            }
+
+            return (
+              <button
+                key={port.portNumber}
+                type="button"
+                onClick={() => openPortEditor(port)}
+                title={port.customerName || port.childAssetLabel || `Port ${port.portNumber} — kosong`}
+                className={`flex flex-col items-center justify-center rounded-md border px-1 py-2 text-[10px] font-semibold transition-colors ${portStateClass}`}
+              >
+                <span>{port.portNumber}</span>
+                <span className="truncate w-full text-center text-[9px]">
+                  {port.customerName || port.childAssetLabel || '-'}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -1091,14 +1098,12 @@ const EVENT_TYPE_LABEL: Record<AssetHistoryEntry['eventType'], string> = {
   status: 'Status diubah',
   lokasi: 'Lokasi diubah',
   induk: 'Aset induk diubah',
-  ping: 'Konektivitas berubah',
+
+  gudang: 'Dipindahkan ke gudang lain',
   port: 'Port diubah',
 };
 
-/** Timeline riwayat perubahan aset — inti fitur "tracking" yang
- * sebenarnya: bukan cuma kondisi terkini, tapi apa yang berubah, kapan,
- * dan siapa yang mengubah (lihat model.AssetHistory backend). */
-function AssetHistoryPanel({ assetId }: { assetId: number }): React.JSX.Element {
+function AssetHistoryPanel({ assetId }: Readonly<{ assetId: number }>): React.JSX.Element {
   const [entries, setEntries] = useState<AssetHistoryEntry[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -1121,33 +1126,40 @@ function AssetHistoryPanel({ assetId }: { assetId: number }): React.JSX.Element 
     };
   }, [assetId]);
 
+  let historyContent: React.JSX.Element;
+  if (isLoading) {
+    historyContent = <p className="text-xs text-textMuted">Memuat riwayat...</p>;
+  } else if (!entries || entries.length === 0) {
+    historyContent = (
+      <p className="text-xs text-textMuted">Belum ada riwayat perubahan tercatat untuk aset ini.</p>
+    );
+  } else {
+    historyContent = (
+      <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
+        {entries.map((entry) => (
+          <div key={entry.id} className="flex gap-2 border-l-2 border-accent/40 pl-3 text-xs">
+            <div className="flex-1">
+              <p className="font-semibold text-text">{EVENT_TYPE_LABEL[entry.eventType] ?? entry.eventType}</p>
+              {entry.fieldLama || entry.fieldBaru ? (
+                <p className="text-textMuted">
+                  {entry.fieldLama || '-'} <span className="mx-1">→</span> {entry.fieldBaru || '-'}
+                </p>
+              ) : null}
+              {entry.catatan ? <p className="text-textMuted">{entry.catatan}</p> : null}
+              <p className="mt-0.5 text-[10px] text-textMuted">
+                {new Date(entry.createdAt).toLocaleString('id-ID')} {entry.userNama ? `· ${entry.userNama}` : ''}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2 border-t border-borderSoft pt-3">
       <h4 className="text-xs font-bold uppercase tracking-wide text-textMuted">Riwayat Perubahan</h4>
-      {isLoading ? (
-        <p className="text-xs text-textMuted">Memuat riwayat...</p>
-      ) : !entries || entries.length === 0 ? (
-        <p className="text-xs text-textMuted">Belum ada riwayat perubahan tercatat untuk aset ini.</p>
-      ) : (
-        <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
-          {entries.map((entry) => (
-            <div key={entry.id} className="flex gap-2 border-l-2 border-accent/40 pl-3 text-xs">
-              <div className="flex-1">
-                <p className="font-semibold text-text">{EVENT_TYPE_LABEL[entry.eventType] ?? entry.eventType}</p>
-                {entry.fieldLama || entry.fieldBaru ? (
-                  <p className="text-textMuted">
-                    {entry.fieldLama || '-'} <span className="mx-1">→</span> {entry.fieldBaru || '-'}
-                  </p>
-                ) : null}
-                {entry.catatan ? <p className="text-textMuted">{entry.catatan}</p> : null}
-                <p className="mt-0.5 text-[10px] text-textMuted">
-                  {new Date(entry.createdAt).toLocaleString('id-ID')} {entry.userNama ? `· ${entry.userNama}` : ''}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {historyContent}
     </div>
   );
 }

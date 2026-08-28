@@ -44,7 +44,6 @@ export function useRegisterPageActionFab(active: boolean): void {
   }, [active, ctx]);
 }
 
-/** Dipakai oleh FAB navigasi global: true kalau ada FAB aksi tabel aktif di halaman ini. */
 export function useHasPageActionFab(): boolean {
   const ctx = useContext(PageFabContext);
   return ctx?.hasActionFab ?? false;

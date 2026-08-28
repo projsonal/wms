@@ -15,24 +15,16 @@ type UsernameCheckState = 'idle' | 'checking' | 'available' | 'taken';
 
 const USERNAME_CHECK_DEBOUNCE_MS = 500;
 
-/**
- * Alert live "username sudah dipakai" — dicek dengan debounce ke
- * GET /auth/username-available setiap user berhenti mengetik sejenak,
- * supaya ketahuan SEBELUM submit form (bukan baru setelah submit gagal
- * dengan error 409 dari backend).
- */
 function useUsernameAvailability(username: string): UsernameCheckState {
   const trimmed = username.trim();
   const [state, setState] = useState<UsernameCheckState>('idle');
 
   useEffect(() => {
     if (trimmed.length < 4) {
-      // Tidak perlu setState di sini -- nilai "idle" untuk kasus ini
-      // sudah ditangani lewat turunan di baris return di bawah, jadi
-      // effect ini tidak perlu terpicu genap untuk username pendek.
+
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- menandai "sedang mengecek" sebelum memulai pengecekan async (debounce+fetch) di bawah, pola yang sama dipakai di banyak tempat lain pada codebase ini
+
     setState('checking');
     const timer = setTimeout(() => {
       authApi
@@ -51,7 +43,7 @@ function usernameHintFor(state: UsernameCheckState): string | undefined {
     case 'checking':
       return 'Mengecek ketersediaan username...';
     case 'taken':
-      return 'Username ini sudah dipakai, coba yang lain.';
+      return 'Username ini sudah digunakan, coba gunakan username yang lain.';
     case 'available':
       return 'Username tersedia.';
     default:
@@ -65,7 +57,7 @@ function usernameHintClassName(state: UsernameCheckState): string {
   return 'text-xs text-textMuted';
 }
 
-export function RegisterStep({ values, errors, onChange }: RegisterStepProps): React.JSX.Element {
+export function RegisterStep({ values, errors, onChange }: Readonly<RegisterStepProps>): React.JSX.Element {
   const usernameCheck = useUsernameAvailability(values.username);
   const usernameHint = usernameHintFor(usernameCheck);
 

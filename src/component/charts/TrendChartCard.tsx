@@ -22,7 +22,7 @@ export function TrendChartCard({
   primaryLabel,
   secondaryLabel,
   errorMessage,
-}: TrendChartCardProps): React.JSX.Element {
+}: Readonly<TrendChartCardProps>): React.JSX.Element {
   return (
     <Card className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">

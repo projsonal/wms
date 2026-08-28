@@ -93,11 +93,6 @@ interface PasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
   error?: string;
 }
 
-/**
- * Input password dengan tombol mata untuk menampilkan/menyembunyikan
- * ketikan pengguna — membantu pengguna memastikan tidak salah ketik tanpa
- * harus mengetik ulang, sambil defaultnya tetap tersembunyi (type="password").
- */
 export function PasswordInput({
   label,
   error,
@@ -145,12 +140,6 @@ interface NumberFieldProps
   onValueChange: (value: number) => void;
 }
 
-/**
- * Input angka polos (Stok Minimum, Qty, dsb) TANPA panah tambah/kurang
- * bawaan <input type="number">. Dipakai `type="text"` + `inputMode="numeric"`
- * supaya keyboard angka tetap muncul di HP, tapi karakter non-digit disaring
- * langsung saat mengetik.
- */
 export function NumberField({
   label,
   error,
@@ -190,12 +179,6 @@ interface CurrencyFieldProps
   onValueChange: (value: number) => void;
 }
 
-/**
- * Input nominal Rupiah — user cukup ketik angka, tampilan langsung
- * terformat "Rp 20.000" (titik pemisah ribuan ala id-ID). Nilai yang
- * dikirim ke parent (`onValueChange`) tetap angka murni (20000), bukan
- * string berformat, supaya aman dikirim ke backend.
- */
 export function CurrencyField({
   label,
   error,
@@ -238,23 +221,16 @@ interface SelectWithCreateProps {
   value: string;
   onChange: (value: string) => void;
   options: SelectOption[];
-  /** Label baris paling bawah dropdown, contoh: "+ Tambah Satuan Baru". */
+
   createLabel: string;
-  /** Label field kedua di form inline, contoh "Singkatan". Kosongkan kalau cuma butuh 1 field (nama). */
+
   secondaryFieldLabel?: string;
-  /** Dipanggil saat user submit form "Tambah Baru". Harus melempar Error kalau gagal. */
+
   onCreate: (nama: string, secondary?: string) => Promise<SelectOption>;
 }
 
 const CREATE_NEW_SENTINEL = '__create_new__';
 
-/**
- * Dropdown biasa, tapi baris paling bawah ("+ Tambah ... Baru") membuka
- * mini-form inline (nama [+ singkatan opsional]) supaya user bisa
- * menambah nilai referensi (satuan/kategori) baru tanpa keluar dari form
- * yang sedang diisi. Setelah tersimpan, opsi baru langsung otomatis
- * terpilih.
- */
 export function SelectWithCreate({
   label,
   error,

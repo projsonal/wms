@@ -1,15 +1,6 @@
-import type { Asset, BarangRusak, InventoryRecord, Item, ManagedUser, Supplier, UserRole } from '@/types';
-import type { RawAsset, RawBarang, RawBarangRusak, RawStockOpname, RawSupplier, RawUser } from '@/lib/api/raw-types';
+import type { Asset, BarangRusak, BarangSerialUnit, Item, ManagedUser, StokGudangRecord, UserDeviceSession, UserRole } from '@/types';
+import type { RawAsset, RawBarang, RawBarangRusak, RawBarangSerial, RawRingkasanStokRow, RawUser, RawUserSession } from '@/lib/api/raw-types';
 
-/**
- * internal/model/barang.go -> Item (types/index.ts).
- * Catatan jujur: `Barang` di backend TIDAK punya relasi ke gudang (tidak
- * ada `gudang_id` di tabel `barang` — stok agregat lintas gudang, lihat
- * kolom `stok`). Karena itu `warehouseId`/`warehouseName` di sini diisi
- * placeholder kosong; kalau butuh breakdown stok per gudang, itu perlu
- * endpoint/kolom baru di backend (mis. tabel `barang_gudang`), bukan
- * sekadar penyesuaian nama field di frontend.
- */
 function computeItemStatus(stok: number, stokMinimum: number): Item['status'] {
   if (stok <= 0) {
     return 'habis';
@@ -36,63 +27,57 @@ export function mapBarangToItem(raw: RawBarang): Item {
     warehouseId: '',
     warehouseName: '-',
     status: computeItemStatus(raw.stok, raw.stokMinimum),
+    createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     isProtected: raw.isProtected ?? false,
+    isSerialized: raw.isSerialized ?? false,
+    merek: raw.merek || undefined,
+    tipe: raw.tipe || undefined,
     approvalStatus: raw.approvalStatus ?? 'disetujui',
     catatanApproval: raw.catatanApproval,
     submittedByUserId: raw.diajukanOleh ?? undefined,
+    delegatedToUserId: raw.didelegasikanKe ?? undefined,
+    delegatedToName: raw.didelegasikan?.fullName,
   };
 }
 
-/** internal/controller/barang BarangRequest — kategori_id & satuan_id WAJIB
- * ID numerik (bukan teks), jadi form pemanggil harus mengisi categoryId/
- * unitId dari dropdown /gudang/kategori & /gudang/satuan (lihat kategoriApi
- * & satuanApi di modules.ts), bukan mengetik bebas. */
 export function mapItemToBarangPayload(item: Partial<Item>): Record<string, unknown> {
   return {
     kode_barang: item.sku,
     nama: item.name,
     harga_beli: item.price,
-    // Stok DIKIRIM SEBAGAI NILAI MUTLAK, bukan tambah/kurang — WAJIB
-    // selalu disertakan (bukan cuma saat sengaja diubah), karena backend
-    // Update() sekarang menimpa kolom stok dengan nilai ini setiap kali
-    // form disimpan. Kalau field ini hilang dari payload, stok akan
-    // ke-reset jadi 0 tanpa sengaja setiap kali "Ubah Barang" disimpan.
+
     stok: item.stock ?? 0,
     stok_minimum: item.minStock,
     berat_gram: item.weightGram ?? null,
     kategori_id: item.categoryId ? Number(item.categoryId) : undefined,
     satuan_id: item.unitId ? Number(item.unitId) : undefined,
     deskripsi: item.deskripsi ?? '',
+    is_serialized: item.isSerialized ?? false,
+    merek: item.merek ?? '',
+    tipe: item.tipe ?? '',
   };
 }
 
-/** internal/model/supplier.go -> Supplier (types/index.ts). */
-export function mapSupplierRaw(raw: RawSupplier): Supplier {
+export function mapBarangSerialToUnit(raw: RawBarangSerial): BarangSerialUnit {
   return {
     id: String(raw.id),
-    code: raw.kode,
-    name: raw.nama,
-    contactPerson: raw.pic ?? '-',
-    phone: raw.telepon ?? '-',
-    courierPartners: (raw.kerjasamaKurir ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    address: raw.alamat ?? '-',
-    npwp: raw.npwp ?? undefined,
-    notes: raw.catatan ?? undefined,
-    // totalOrders/rating: dihitung backend dari data Pengiriman yang
-    // memakai kurir-kurir di courierPartners (lihat SupplierResponse di
-    // internal/controller/supplier/struct.go) — bukan lagi hardcode 0.
-    totalOrders: raw.totalOrder ?? 0,
-    rating: raw.rating ?? 0,
-    status: raw.isActive ? 'aktif' : 'nonaktif',
-    isProtected: raw.isProtected ?? false,
+    barangId: String(raw.barangId),
+    barangNama: raw.barang?.nama,
+    barangMerek: raw.barang?.merek || undefined,
+    barangTipe: raw.barang?.tipe || undefined,
+    serialNumber: raw.serialNumber,
+    status: raw.status,
+    warehouseId: raw.gudangId ? String(raw.gudangId) : undefined,
+    warehouseName: raw.gudang?.nama,
+    catatan: raw.catatan,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    nomorBarangMasuk: raw.nomorBarangMasuk || undefined,
+    nomorBarangKeluar: raw.nomorBarangKeluar || undefined,
   };
 }
 
-/** internal/model/asset.go -> Asset (types/index.ts). */
 export function mapAssetRaw(raw: RawAsset): Asset {
   return {
     id: String(raw.id),
@@ -106,23 +91,27 @@ export function mapAssetRaw(raw: RawAsset): Asset {
     longitude: raw.longitude ?? undefined,
     status: raw.status,
     keterangan: raw.keterangan,
-    ipAddress: raw.ipAddress || undefined,
-    pingStatus: raw.pingStatus ?? 'unknown',
-    lastPingAt: raw.lastPingAt ?? undefined,
+    merek: raw.merek || undefined,
+    tipe: raw.tipe || undefined,
     parentAssetId: raw.parentAssetId ? String(raw.parentAssetId) : undefined,
     jumlahPort: raw.jumlahPort ?? 0,
+    barangId: raw.barangId ? String(raw.barangId) : undefined,
+    kodeBarang: raw.barang?.kodeBarang || undefined,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
   };
 }
 
-/** internal/model/barang_rusak.go -> BarangRusak (types/index.ts). */
 export function mapBarangRusakRaw(raw: RawBarangRusak): BarangRusak {
   return {
     id: String(raw.id),
     barangId: raw.barangId ? String(raw.barangId) : undefined,
     labelBarang: raw.labelBarang,
     namaBarang: raw.namaBarang,
+    kodeBarang: raw.barang?.kodeBarang || undefined,
+    merek: raw.barang?.merek || undefined,
+    tipe: raw.barang?.tipe || undefined,
+    serialNumber: raw.serialNumber || undefined,
     keterangan: raw.keterangan,
     fotoUrl: raw.fotoUrl || undefined,
     jenisBarang: raw.jenisBarang || undefined,
@@ -136,33 +125,18 @@ export function mapBarangRusakRaw(raw: RawBarangRusak): BarangRusak {
   };
 }
 
-/** internal/model/stock_opname.go -> InventoryRecord[] (types/index.ts).
- * SATU dokumen Stock Opname berisi BANYAK item — diratakan (flatten) jadi
- * satu baris per item supaya tetap cocok tampil di tabel "per SKU" yang
- * sudah ada (Manajemen Inventaris & Inventaris overview), sambil tetap
- * membawa nomorOpname & status dokumen induknya untuk konteks. Hanya
- * dokumen berstatus "selesai" yang dianggap otoritatif (draft belum final,
- * jangan dicampur ke ringkasan stok). */
-export function mapStockOpnameToRecords(raw: RawStockOpname): InventoryRecord[] {
-  if (!raw.items || raw.items.length === 0) return [];
-  return raw.items.map((item) => ({
-    id: `${raw.id}-${item.id}`,
-    itemName: item.barang?.nama ?? '-',
-    sku: item.barang?.kodeBarang ?? '-',
-    warehouseName: raw.gudang?.nama ?? '-',
-    quantity: item.stokSistem,
-    unit: '-',
-    lastOpname: raw.tanggal,
-    variance: item.selisih,
-    status: item.selisih === 0 ? 'sesuai' : 'selisih',
-  }));
+export function mapRingkasanStokRow(raw: RawRingkasanStokRow): StokGudangRecord {
+  return {
+    id: `${raw.barangId}-${raw.gudangId}`,
+    barangId: String(raw.barangId),
+    sku: raw.kodeBarang,
+    itemName: raw.namaBarang,
+    gudangId: String(raw.gudangId),
+    warehouseName: raw.namaGudang,
+    quantity: raw.stok,
+  };
 }
 
-/** internal/controller/users Response -> ManagedUser (types/index.ts).
- * `roleName` datang sebagai string bebas dari backend (mengikuti nama role
- * yang dibuat lewat Manajemen Role) — dijaga ke salah satu dari 3 role baku
- * aplikasi, fallback 'karyawan' kalau backend mengirim nama role lain yang
- * belum dikenal frontend, supaya tidak crash. */
 export function mapUserRaw(raw: RawUser): ManagedUser {
   const knownRoles: UserRole[] = ['super_admin', 'admin', 'karyawan'];
   const role = (knownRoles as string[]).includes(raw.roleName)
@@ -173,13 +147,25 @@ export function mapUserRaw(raw: RawUser): ManagedUser {
     name: raw.fullName,
     username: raw.username,
     email: raw.email,
+    phoneNumber: raw.phoneNumber || undefined,
     role,
     status: raw.isActive ? 'aktif' : 'nonaktif',
-    // isOnline: status login REAL-TIME (punya sesi aktif sekarang) —
-    // dipakai kolom "Status" di tabel Manajemen User, BEDA dari `status`
-    // di atas (itu akun diaktifkan/dinonaktifkan admin, bukan soal
-    // sedang login atau tidak).
+
     isOnline: raw.isOnline ?? false,
     lastLogin: raw.lastLoginAt ?? undefined,
+  };
+}
+
+export function mapUserSessionRaw(raw: RawUserSession): UserDeviceSession {
+  return {
+    id: String(raw.id),
+    browser: raw.browser || undefined,
+    browserVersion: raw.browserVersion || undefined,
+    os: raw.os || undefined,
+    osVersion: raw.osVersion || undefined,
+    deviceType: raw.deviceType || undefined,
+    ipAddress: raw.ipAddress || undefined,
+    location: raw.location || undefined,
+    createdAt: raw.createdAt,
   };
 }
