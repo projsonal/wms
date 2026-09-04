@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -23,6 +23,7 @@ import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { formatDate } from '@/lib/utils/format';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { GENERIC_STATUS_META } from '@/lib/utils/status';
 import type { RawStockOpname } from '@/lib/api/raw-types';
 
@@ -48,6 +49,20 @@ const SO_STATUS_META: Record<string, { label: string; variant: 'success' | 'warn
   dibatalkan: { label: 'Dibatalkan', variant: 'neutral' },
 };
 
+// Data stok sistem & fisik sudah ada per item — helper ini menghitung berapa
+// SKU pada satu sesi yang hasilnya TIDAK sesuai (selisih !== 0), supaya bisa
+// ditonjolkan di level daftar (bukan cuma terlihat di modal rincian).
+function countSelisihItems(row: RawStockOpname): number {
+  return (row.items ?? []).filter((it) => it.selisih !== 0).length;
+}
+
+function SelisihBadge({ count }: { count: number }): React.JSX.Element {
+  if (count === 0) {
+    return <Badge label="Sesuai" variant="success" />;
+  }
+  return <Badge label={`${count} Selisih`} variant="danger" />;
+}
+
 export function InventoryManagementContent(): React.JSX.Element {
   const { user } = useAuth();
   const isStaff = user?.role === 'super_admin' || user?.role === 'admin';
@@ -66,6 +81,26 @@ export function InventoryManagementContent(): React.JSX.Element {
   );
   const { data: warehouseList } = useSWR('warehouses-for-opname', () => warehousesApi.list({ pageSize: 100 }));
   const { data: itemList } = useSWR('items-for-opname', () => itemsApi.list({ pageSize: 500 }));
+  // mutateStokGudang WAJIB dipanggil manual setelah aksi yang benar-benar
+  // mengubah stok (terutama Selesaikan) — SWR key ini terpisah dari
+  // 'stock-opname-sessions' di atas, jadi mutate() untuk daftar sesi TIDAK
+  // ikut menyegarkan cache ringkasan stok ini. Tanpa ini, kolom/figur "Stok
+  // Sistem" (dipakai lewat liveStokSistem di bawah) bisa nyangkut di angka
+  // lama sampai ada revalidasi SWR lain yang kebetulan terjadi (fokus tab,
+  // dsb).
+  const { data: stokGudangList, mutate: mutateStokGudang } = useSWR('stok-gudang-for-opname', () => inventoryApi.ringkasanStok());
+
+  // Stok sistem yang benar itu PER GUDANG, bukan total global barang.
+  // Peta ini dipakai supaya form langsung menampilkan angka yang sama dengan
+  // yang akan dipakai sebagai "Stok Sistem" saat sesi dibuat/diselesaikan.
+  const stokPerGudangMap = new Map<string, number>();
+  (stokGudangList?.data ?? []).forEach((row) => {
+    stokPerGudangMap.set(`${row.barangId}-${row.gudangId}`, row.quantity);
+  });
+  function liveStokSistem(barangId: string): number {
+    if (!barangId || !gudangId) return 0;
+    return stokPerGudangMap.get(`${barangId}-${gudangId}`) ?? 0;
+  }
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -86,6 +121,11 @@ export function InventoryManagementContent(): React.JSX.Element {
       return next;
     });
   }
+
+  const sesiDenganSelisihCount = useMemo(
+    () => rows.filter((r) => countSelisihItems(r) > 0).length,
+    [rows],
+  );
 
   const [detailFor, setDetailFor] = useState<RawStockOpname | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
@@ -122,11 +162,31 @@ export function InventoryManagementContent(): React.JSX.Element {
     setGudangId(String(row.gudangId));
     setTanggal(row.tanggal ? row.tanggal.slice(0, 10) : '');
     setCatatan(row.catatan ?? '');
-    const rowsFromSession = (row.items ?? []).map((it) => ({
-      key: nextRowKey(),
-      barangId: String(it.barangId),
-      stokFisik: it.stokFisik ?? 0,
-    }));
+
+    // Sesi lama (dibuat sebelum barang yang sama tidak boleh dipilih dobel di
+    // satu sesi) mungkin masih punya lebih dari satu baris untuk barang_id
+    // yang sama. Gabungkan di sini secara EKSPLISIT (bukan diam-diam saat
+    // Simpan) supaya operator tahu kenapa jumlah barisnya berubah.
+    const mergedByBarangId = new Map<string, { key: string; barangId: string; stokFisik: number }>();
+    const order: string[] = [];
+    let duplicateCount = 0;
+    (row.items ?? []).forEach((it) => {
+      const barangId = String(it.barangId);
+      const existing = mergedByBarangId.get(barangId);
+      if (existing) {
+        existing.stokFisik += it.stokFisik ?? 0;
+        duplicateCount += 1;
+        return;
+      }
+      mergedByBarangId.set(barangId, { key: nextRowKey(), barangId, stokFisik: it.stokFisik ?? 0 });
+      order.push(barangId);
+    });
+    const rowsFromSession = order.map((barangId) => mergedByBarangId.get(barangId)!);
+    if (duplicateCount > 0) {
+      toast(
+        `Sesi ini punya ${duplicateCount} baris SKU ganda dari sebelumnya — sudah digabung otomatis (Stok Fisik dijumlahkan). Cek lagi angkanya sebelum menyimpan.`,
+      );
+    }
     setItemRows(rowsFromSession.length > 0 ? rowsFromSession : [emptyRow()]);
     setIsModalOpen(true);
   }
@@ -162,7 +222,7 @@ export function InventoryManagementContent(): React.JSX.Element {
       }
       setIsModalOpen(false);
       setEditingId(null);
-      await mutate();
+      await Promise.all([mutate(), mutateStokGudang()]);
     } catch (err) {
       toast.error(friendlyError(err, editingId ? 'Gagal mengubah sesi Stock Opname.' : 'Gagal membuat sesi Stock Opname.'));
     } finally {
@@ -212,7 +272,7 @@ export function InventoryManagementContent(): React.JSX.Element {
   async function handleComplete(row: RawStockOpname): Promise<void> {
     const ok = await confirm({
       title: 'Selesaikan Stock Opname?',
-      message: `Stok barang di sistem ini bersifat GLOBAL (gabungan seluruh gudang, bukan per-gudang). Menyelesaikan ${row.nomorOpname} akan MENGGANTI TOTAL stok tiap barang dengan hasil hitung fisik di gudang ini, apabila ada barang yang sama tersimpan di gudang lain, stok di sana ikut terhitung hilang dari total. Pastikan SKU yang dihitung di sesi ini memang cuma ada di gudang ini sebelum lanjut.`,
+      message: `Menyelesaikan ${row.nomorOpname} akan mengganti stok SISTEM di gudang ${row.gudang?.nama ?? 'ini'} untuk tiap SKU pada sesi ini, mengikuti hasil hitung fisik. Stok di gudang lain tidak ikut berubah. Angka "Stok Sistem" di bawah sudah disegarkan mengikuti kondisi terbaru sebelum diterapkan.`,
       confirmLabel: 'Ya, Saya Yakin',
       variant: 'protect',
     });
@@ -220,7 +280,10 @@ export function InventoryManagementContent(): React.JSX.Element {
     try {
       await inventoryApi.complete(String(row.id));
       toast.success('Stock Opname selesai, stok sistem sudah disesuaikan.');
-      await mutate();
+      // Complete() benar-benar mengubah stok gudang — cache ringkasan stok
+      // (dipakai untuk figur "Stok Sistem") harus ikut disegarkan, bukan
+      // cuma daftar sesinya.
+      await Promise.all([mutate(), mutateStokGudang()]);
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal menyelesaikan Stock Opname.'));
     }
@@ -289,7 +352,12 @@ export function InventoryManagementContent(): React.JSX.Element {
         return codes.length === 1 ? codes[0] : `${codes[0]} +${codes.length - 1} lainnya`;
       },
     },
-    { key: 'items', header: 'Jumlah SKU', align: 'right', render: (row) => row.items?.length ?? 0 },
+    { key: 'items', header: 'Jumlah Jenis Barang', align: 'right', render: (row) => row.items?.length ?? 0 },
+    {
+      key: 'selisih',
+      header: 'Selisih',
+      render: (row) => <SelisihBadge count={countSelisihItems(row)} />,
+    },
     {
       key: 'status',
       header: 'Status',
@@ -364,6 +432,7 @@ export function InventoryManagementContent(): React.JSX.Element {
           { id: 'total', label: 'Total Sesi', value: serverPagination.total ?? rows.length },
           { id: 'draft', label: 'Draft', value: rows.filter((r) => r.status === 'draft').length },
           { id: 'selesai', label: 'Selesai', value: rows.filter((r) => r.status === 'selesai').length },
+          { id: 'selisih', label: 'Sesi dengan Selisih', value: sesiDenganSelisihCount },
         ]}
       />
       <p className="text-xs text-textMuted">
@@ -411,17 +480,22 @@ export function InventoryManagementContent(): React.JSX.Element {
               const exportColumns = [
                 { header: 'No. Opname', accessor: (row: (typeof rows)[number]) => row.nomorOpname },
                 { header: 'Gudang', accessor: (row: (typeof rows)[number]) => row.gudang?.nama ?? '-' },
-                { header: 'Tanggal', accessor: (row: (typeof rows)[number]) => formatDate(row.tanggal) },
-                { header: 'Jumlah SKU', accessor: (row: (typeof rows)[number]) => String(row.items?.length ?? 0) },
+                { header: 'Tanggal', accessor: (row: (typeof rows)[number]) => formatTanggalPanjang(row.tanggal) },
+                { header: 'Jumlah Jenis Barang', accessor: (row: (typeof rows)[number]) => row.items?.length ?? 0 },
                 { header: 'Status', accessor: (row: (typeof rows)[number]) => row.status },
               ];
               const pdfMeta = {
                 title: 'Rekap Data Stock Opname',
                 subtitle: 'Manajemen / Manajemen Inventaris',
-                description: 'Riwayat sesi di hitung berdasarkan fisik stok (stock opname) per gudang, beserta jumlah SKU yang dihitung dan status penerapannya ke stok sistem.',
+                description: 'Riwayat sesi di hitung berdasarkan fisik stok (stock opname) per gudang, beserta jumlah jenis barang yang dihitung dan status penerapannya ke stok sistem.',
+              };
+              const granularity: GranularityConfig<RawStockOpname> = {
+                dateAccessor: (row) => row.tanggal,
+                sumHeaders: ['Jumlah Jenis Barang'],
+                groupKeyHeader: 'Gudang',
               };
               if (action === 'export') {
-                requestExport(rows, exportColumns, 'sesi-stock-opname', pdfMeta);
+                requestExport(rows, exportColumns, 'sesi-stock-opname', pdfMeta, granularity);
               } else {
                 printRowsToPdf(rows, exportColumns, { ...pdfMeta, generatedBy: user?.fullName });
               }
@@ -465,11 +539,19 @@ export function InventoryManagementContent(): React.JSX.Element {
           placeholder="Pilih gudang"
           options={(warehouseList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
         />
-        <p className="-mt-2 rounded-md bg-warningBg px-3 py-2 text-xs text-warningText">
-          Stok barang di sistem ini bersifat GLOBAL (gabungan seluruh gudang), belum per-gudang.
-          Cuma hitung SKU yang memang HANYA tersimpan di gudang ini — kalau SKU yang sama juga ada
-          di gudang lain, menyelesaikan sesi ini akan menggantikan stok totalnya dengan angka
-          gudang ini saja.
+        <p className="-mt-2 rounded-md bg-accentSoft px-3 py-2 text-xs text-textMuted">
+          &quot;Stok Sistem&quot; di bawah dihitung khusus untuk gudang yang dipilih (bukan gabungan semua
+          gudang) dan selalu angka terkini — jadi kalau sebelumnya sempat tercatat 0 padahal
+          barangnya sudah ada secara fisik, cek dulu apakah Barang Masuk untuk barang ini sudah
+          diselesaikan (bukan masih Draft) di gudang yang sama.
+          {editingId ? (
+            <>
+              {' '}
+              Saat disimpan, Stok Sistem &amp; Selisih untuk SEMUA baris di sesi ini akan dihitung
+              ulang dari kondisi terkini — bukan cuma baris yang Anda ubah — supaya angkanya
+              tetap akurat.
+            </>
+          ) : null}
         </p>
         <Input label="Tanggal" type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} />
         <Input label="Catatan (opsional)" value={catatan} onChange={(e) => setCatatan(e.target.value)} />
@@ -504,13 +586,15 @@ export function InventoryManagementContent(): React.JSX.Element {
                 value={row.barangId}
                 onChange={(e) => updateRow(row.key, { barangId: e.target.value })}
                 placeholder="Pilih barang"
-                options={(itemList?.data ?? []).map((it) => ({ label: `${it.sku} — ${it.name}`, value: it.id }))}
+                options={(itemList?.data ?? [])
+                  .filter((it) => it.id === row.barangId || !itemRows.some((r) => r.barangId === it.id))
+                  .map((it) => ({ label: `${it.sku} — ${it.name}`, value: it.id }))}
               />
               {row.barangId ? (
                 <p className="text-xs text-textMuted">
-                  Stok sistem saat ini (global, semua gudang):{' '}
+                  Stok sistem saat ini di gudang terpilih:{' '}
                   <span className="font-semibold text-text">
-                    {itemList?.data.find((it) => it.id === row.barangId)?.stock ?? '-'}
+                    {gudangId ? liveStokSistem(row.barangId) : 'pilih gudang dulu'}
                   </span>
                 </p>
               ) : null}

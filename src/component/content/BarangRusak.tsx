@@ -17,6 +17,7 @@ import { useResourceList } from '@/lib/hooks/useResourceList';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { BARANG_RUSAK_STATUS_META } from '@/lib/utils/status';
 import { resolveUploadUrl } from '@/lib/api/client';
 import type { BarangRusak } from '@/types';
@@ -155,6 +156,7 @@ function BarangRusakBody(): React.JSX.Element {
   }
 
   const EXPORT_COLUMNS = [
+    { header: 'Tanggal Lapor', accessor: (r: BarangRusak) => formatTanggalPanjang(r.createdAt) },
     { header: 'Label/Kode Barang', accessor: (r: BarangRusak) => r.labelBarang },
     { header: 'Nama Barang', accessor: (r: BarangRusak) => r.namaBarang },
     { header: 'Keterangan', accessor: (r: BarangRusak) => r.keterangan ?? '-' },
@@ -167,9 +169,14 @@ function BarangRusakBody(): React.JSX.Element {
     subtitle: 'Menu Utama / Barang Rusak',
     description: 'Daftar laporan barang rusak/retur beserta status hasil pengecekan fisik.',
   };
+  const GRANULARITY: GranularityConfig<BarangRusak> = {
+    dateAccessor: (r) => r.createdAt,
+    sumHeaders: [],
+    groupKeyHeader: 'Status',
+  };
 
   function handleExport(): void {
-    requestExport(rows, EXPORT_COLUMNS, 'daftar-barang-rusak', PDF_META);
+    requestExport(rows, EXPORT_COLUMNS, 'daftar-barang-rusak', PDF_META, GRANULARITY);
   }
 
   function handlePrint(): void {

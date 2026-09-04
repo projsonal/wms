@@ -12,6 +12,14 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('id-ID', {
   year: 'numeric',
 });
 
+const DATETIME_FORMATTER = new Intl.DateTimeFormat('id-ID', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 export function formatCurrency(value: number): string {
   return CURRENCY_FORMATTER.format(value);
 }
@@ -26,6 +34,14 @@ export function formatDate(value: string | Date): string {
     return '-';
   }
   return DATE_FORMATTER.format(date);
+}
+
+export function formatDateTime(value: string | Date): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return DATETIME_FORMATTER.format(date).replace(':', '.');
 }
 
 export function truncate(text: string, maxLength: number): string {

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { toast } from 'sonner';
-import { Trash2, CheckCircle2, XCircle, Plus, X, Eye } from 'lucide-react';
+import { Trash2, CheckCircle2, XCircle, Plus, X, Eye, Lock, Unlock } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
@@ -14,11 +14,13 @@ import { ScanSnButton } from '@/component/ui/ScanSnButton';
 import { StatsRow } from '@/component/ui/StatsRow';
 import { useAuth } from '@/auth/AuthContext';
 import { usePermissions } from '@/lib/hooks/usePermissions';
-import { goodsOutApi, itemsApi, kategoriApi, warehousesApi, barangSerialApi, type KategoriRaw } from '@/lib/api/modules';
+import { goodsOutApi, itemsApi, kategoriApi, satuanApi, warehousesApi, barangSerialApi, type KategoriRaw } from '@/lib/api/modules';
+import { QuickAddItemModal } from '@/component/gudang/QuickAddItemModal';
 import { HttpError } from '@/lib/api/client';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { formatDate } from '@/lib/utils/format';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { GENERIC_STATUS_META } from '@/lib/utils/status';
 import { useServerPaginatedList } from '@/lib/hooks/useServerPaginatedList';
@@ -48,22 +50,88 @@ function friendlyError(err: unknown, fallback: string): string {
   return fallback;
 }
 
+interface SpesifikasiEditorProps {
+  item: RawBarangKeluarItem;
+  onSave: (payload: { jumlahTerpasang: number; catatan: string }) => Promise<void>;
+}
+
+function SpesifikasiEditor({ item, onSave }: SpesifikasiEditorProps): React.JSX.Element {
+  const [jumlahTerpasang, setJumlahTerpasang] = useState(item.jumlahTerpasang ?? 0);
+  const [catatan, setCatatan] = useState(item.catatanSpesifikasi ?? '');
+  const [isSaving, setIsSaving] = useState(false);
+  const sisa = Math.max(item.qty - jumlahTerpasang, 0);
+
+  async function handleSave(): Promise<void> {
+    setIsSaving(true);
+    try {
+      await onSave({ jumlahTerpasang, catatan });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-2 rounded bg-neutralBg/50 p-2">
+      <span className="text-[11px] font-semibold text-textMuted">
+        Spesifikasi Pemasangan (mis. kabel: terpakai / terpasang / sisa)
+      </span>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-textMuted">Terpakai</span>
+          <span className="text-sm font-semibold text-text">{item.qty}</span>
+        </div>
+        <NumberField
+          label="Terpasang"
+          value={jumlahTerpasang}
+          onValueChange={(value) => setJumlahTerpasang(Math.min(Math.max(value, 0), item.qty))}
+        />
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-textMuted">Sisa</span>
+          <span className="text-sm font-semibold text-text">{sisa}</span>
+        </div>
+      </div>
+      <Input
+        label="Catatan (opsional)"
+        value={catatan}
+        onChange={(e) => setCatatan(e.target.value)}
+        placeholder="mis. terpasang di Blok A"
+      />
+      <Button variant="secondary" onClick={handleSave} loading={isSaving} className="self-start">
+        Simpan Spesifikasi
+      </Button>
+    </div>
+  );
+}
+
 export function BarangKeluarContent(): React.JSX.Element {
   const { user } = useAuth();
   const isStaff = user?.role === 'super_admin' || user?.role === 'admin';
+  const isSuperAdmin = user?.role === 'super_admin';
   const { can } = usePermissions();
   const canEditBK = isStaff || can('barang_keluar', 'edit');
   const confirm = useConfirm();
   const { requestExport, dialog: exportDialog } = useExportFormat();
 
   const [kategoriId, setKategoriId] = useState('');
+  const [filterBarangId, setFilterBarangId] = useState('');
+  const [filterMerek, setFilterMerek] = useState('');
+  const [filterTipe, setFilterTipe] = useState('');
   const { data: kategoriList } = useSWR<KategoriRaw[]>('kategori-list', () => kategoriApi.list());
-  const { data: barangList } = useSWR('items-for-goods-out', () => itemsApi.list({ pageSize: 200 }));
+  const { data: satuanList } = useSWR('satuan-list', () => satuanApi.list());
+  const { data: barangList, mutate: mutateBarangList } = useSWR('items-for-goods-out', () => itemsApi.list({ pageSize: 200 }));
   const { data: gudangList } = useSWR('warehouses-for-goods-out', () => warehousesApi.list({ pageSize: 100 }));
+
+  const merekOptions = Array.from(new Set((barangList?.data ?? []).map((b) => b.merek).filter(Boolean))) as string[];
+  const tipeOptions = Array.from(new Set((barangList?.data ?? []).map((b) => b.tipe).filter(Boolean))) as string[];
+
+  const [quickAddForRowIndex, setQuickAddForRowIndex] = useState<number | null>(null);
 
   const { input: searchInput, setInput: setSearchInput, term: searchTerm } = useDebouncedSearch();
   const { rows, isLoading, mutate, serverPagination } = useServerPaginatedList('goods-out', goodsOutApi, {
     kategori_id: kategoriId || undefined,
+    barang_id: filterBarangId || undefined,
+    merek: filterMerek || undefined,
+    tipe: filterTipe || undefined,
     search: searchTerm || undefined,
   });
 
@@ -135,11 +203,19 @@ export function BarangKeluarContent(): React.JSX.Element {
     setPenerima('');
     setItemRows([{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
     setIsModalOpen(true);
+    // Lihat komentar yang sama di BarangMasuk.tsx: daftar barang cuma
+    // di-fetch sekali saat mount, jadi bisa masih kosong/gagal diam-diam
+    // di koneksi lambat (HP) saat modal ini dibuka. Paksa muat ulang.
+    void mutateBarangList();
   }
 
   function openEditModal(row: RawBarangKeluar): void {
     if (row.status !== 'draft') {
       toast.error('Hanya dokumen berstatus draft yang bisa diubah.');
+      return;
+    }
+    if (row.isProtected) {
+      toast.error('Dokumen ini dikunci (Protect) oleh super admin — tidak bisa diubah.');
       return;
     }
     setEditingId(String(row.id));
@@ -154,6 +230,7 @@ export function BarangKeluarContent(): React.JSX.Element {
     }));
     setItemRows(rowsFromDoc.length > 0 ? rowsFromDoc : [{ ...EMPTY_ITEM_ROW, key: nextRowKey() }]);
     setIsModalOpen(true);
+    void mutateBarangList();
   }
 
   function updateItemRow(index: number, patch: Partial<ItemRow>): void {
@@ -206,6 +283,10 @@ export function BarangKeluarContent(): React.JSX.Element {
   async function handleDelete(row: RawBarangKeluar): Promise<void> {
     if (row.status !== 'draft') {
       toast.error('Hanya dokumen berstatus draft yang bisa dihapus.');
+      return;
+    }
+    if (row.isProtected) {
+      toast.error('Dokumen ini dikunci (Protect) oleh super admin — tidak bisa dihapus.');
       return;
     }
     const ok = await confirm({
@@ -262,6 +343,9 @@ export function BarangKeluarContent(): React.JSX.Element {
             gudangId: String(full.gudangId),
             status: 'tersedia',
             pageSize: 200,
+            // FIFO: unit yang tercatat masuk paling lama muncul duluan, supaya
+            // yang disarankan/terisi otomatis di bawah adalah stok lama dulu.
+            urutan: 'fifo',
           });
           availableMap[barangId] = result.data.map((u) => u.serialNumber);
         }),
@@ -272,9 +356,18 @@ export function BarangKeluarContent(): React.JSX.Element {
     }
     setAvailableSerialsByBarangId(availableMap);
 
+    // Isi otomatis nomor seri dengan urutan FIFO (unit paling lama tercatat
+    // duluan) supaya staf tidak perlu pilih manual satu-satu — tetap bisa
+    // diganti kalau memang perlu unit tertentu.
+    const consumedByBarangId: Record<string, number> = {};
     const initial: Record<string, string[]> = {};
     itemsButuhSN.forEach((it) => {
-      initial[String(it.id)] = Array.from({ length: it.qty }, () => '');
+      const barangId = String(it.barangId);
+      const pool = availableMap[barangId] ?? [];
+      const startIdx = consumedByBarangId[barangId] ?? 0;
+      const suggested = pool.slice(startIdx, startIdx + it.qty);
+      consumedByBarangId[barangId] = startIdx + it.qty;
+      initial[String(it.id)] = Array.from({ length: it.qty }, (_, i) => suggested[i] ?? '');
     });
     setSerialsByItemId(initial);
     setCompletingDoc(full);
@@ -330,6 +423,23 @@ export function BarangKeluarContent(): React.JSX.Element {
     }
   }
 
+  async function handleSaveSpesifikasi(
+    itemId: number,
+    payload: { jumlahTerpasang: number; catatan: string },
+  ): Promise<void> {
+    if (!detailDoc) return;
+    try {
+      const updated = await goodsOutApi.updateSpesifikasi(String(detailDoc.id), String(itemId), payload);
+      toast.success('Spesifikasi pemasangan berhasil disimpan.');
+      setDetailDoc((prev) =>
+        prev ? { ...prev, items: (prev.items ?? []).map((x) => (x.id === updated.id ? updated : x)) } : prev,
+      );
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal menyimpan spesifikasi.'));
+    }
+  }
+
   async function handleCancel(row: RawBarangKeluar): Promise<void> {
     const ok = await confirm({
       title: 'Batalkan Dokumen',
@@ -348,20 +458,25 @@ export function BarangKeluarContent(): React.JSX.Element {
   }
 
   const BK_EXPORT_COLUMNS = [
-    { header: 'Tanggal', accessor: (r: RawBarangKeluar) => r.tanggal },
+    { header: 'Tanggal', accessor: (r: RawBarangKeluar) => formatTanggalPanjang(r.tanggal) },
     { header: 'Nomor Pengeluaran', accessor: (r: RawBarangKeluar) => r.nomorPengeluaran },
     { header: 'Gudang', accessor: (r: RawBarangKeluar) => r.gudang?.nama ?? '-' },
     { header: 'Keperluan', accessor: (r: RawBarangKeluar) => r.keperluan },
     { header: 'Status', accessor: (r: RawBarangKeluar) => r.status },
   ];
   const BK_PDF_META = {
-    title: 'Rekap Data Gudang — Barang Keluar',
+    title: 'Rekap Data Barang Keluar',
     subtitle: 'Pengelolaan / Barang Keluar',
     description: 'Riwayat dokumen pengeluaran barang dari gudang beserta keperluan dan status prosesnya (draft/selesai/dibatalkan).',
   };
+  const BK_GRANULARITY: GranularityConfig<RawBarangKeluar> = {
+    dateAccessor: (r) => r.tanggal,
+    sumHeaders: [],
+    groupKeyHeader: 'Gudang',
+  };
 
   function handleExport(): void {
-    requestExport(rows, BK_EXPORT_COLUMNS, 'daftar-barang-keluar', BK_PDF_META);
+    requestExport(rows, BK_EXPORT_COLUMNS, 'daftar-barang-keluar', BK_PDF_META, BK_GRANULARITY);
   }
 
   async function handleBulkChange(selectedRows: RawBarangKeluar[]): Promise<void> {
@@ -386,6 +501,11 @@ export function BarangKeluarContent(): React.JSX.Element {
       toast.error('Hanya dokumen berstatus draft yang bisa dihapus — batalkan pilihan pada dokumen selesai/dibatalkan.');
       return;
     }
+    const protectedRows = selectedRows.filter((r) => r.isProtected);
+    if (protectedRows.length > 0) {
+      toast.error('Ada dokumen terpilih yang dikunci (Protect) oleh super admin — buka kuncinya dulu sebelum dihapus.');
+      return;
+    }
     const ok = await confirm({
       title: 'Hapus Dokumen Terpilih',
       message: `Apakah yakin ingin menghapus ${selectedRows.length} dokumen draft terpilih?`,
@@ -400,6 +520,60 @@ export function BarangKeluarContent(): React.JSX.Element {
       await mutate();
     } catch (err) {
       toast.error(friendlyError(err, 'Sebagian/semua dokumen gagal dihapus.'));
+    }
+  }
+
+  async function handleToggleProtect(row: RawBarangKeluar): Promise<void> {
+    const willProtect = !row.isProtected;
+    const ok = await confirm({
+      title: willProtect ? 'Kunci Dokumen Ini?' : 'Buka Kunci Dokumen Ini?',
+      message: willProtect
+        ? 'Apakah Anda yakin untuk melindungi/mengunci dokumen ini supaya tidak bisa diubah atau dihapus oleh role karyawan?'
+        : 'Apakah Anda yakin ingin membuka kunci dokumen ini?',
+      confirmLabel: willProtect ? 'Ya, Kunci' : 'Ya, Buka',
+      variant: 'protect',
+    });
+    if (!ok) return;
+    try {
+      await goodsOutApi.setProtected(String(row.id), willProtect);
+      toast.success(willProtect ? 'Dokumen dikunci (Protect).' : 'Dokumen dibuka kuncinya.');
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal mengubah status proteksi (khusus super admin).'));
+    }
+  }
+
+  async function handleBulkProtect(selectedRows: RawBarangKeluar[]): Promise<void> {
+    if (!isBulkMode || selectedRows.length === 0) {
+      toast('Aktifkan "Modify" dulu, lalu pilih dokumen yang mau dikunci/dibuka.');
+      return;
+    }
+    // Lihat komentar di handleBulkProtect BarangMasuk.tsx: kalau seleksinya
+    // campuran (ada yang sudah dikunci, ada yang belum), jangan asal ikuti
+    // status dokumen pertama — bisa-bisa dokumen yang sengaja dikunci malah
+    // ikut terbuka kuncinya.
+    const isMixed = selectedRows.some((r) => r.isProtected) && selectedRows.some((r) => !r.isProtected);
+    if (isMixed) {
+      toast.error('Dokumen terpilih statusnya campuran (ada yang terkunci, ada yang belum) — pilih salah satu jenis saja supaya arah kunci/buka jelas.');
+      return;
+    }
+    const shouldProtect = !selectedRows[0].isProtected;
+    const ok = await confirm({
+      title: shouldProtect ? 'Kunci Dokumen Terpilih?' : 'Buka Kunci Dokumen Terpilih?',
+      message: shouldProtect
+        ? 'Apakah Anda yakin untuk melindungi/mengunci dokumen terpilih supaya tidak bisa diubah atau dihapus oleh role karyawan?'
+        : 'Apakah Anda yakin ingin membuka kunci dokumen terpilih?',
+      confirmLabel: shouldProtect ? 'Ya, Kunci' : 'Ya, Buka',
+      variant: 'protect',
+    });
+    if (!ok) return;
+    try {
+      await Promise.all(selectedRows.map((r) => goodsOutApi.setProtected(String(r.id), shouldProtect)));
+      toast.success(shouldProtect ? 'Dokumen terpilih dikunci.' : 'Dokumen terpilih dibuka kuncinya.');
+      setSelectedIds(new Set());
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal mengubah status proteksi (khusus super admin).'));
     }
   }
 
@@ -425,12 +599,31 @@ export function BarangKeluarContent(): React.JSX.Element {
       case 'delete':
         await handleBulkDelete(selectedRows);
         return;
+      case 'protect':
+        await handleBulkProtect(selectedRows);
+        return;
       default:
         return;
     }
   }
 
   const columns: DataTableColumn<RawBarangKeluar>[] = [
+    ...(isBulkMode
+      ? [
+          {
+            key: 'select',
+            header: '',
+            render: (row: RawBarangKeluar) => (
+              <input
+                type="checkbox"
+                checked={selectedIds.has(String(row.id))}
+                onChange={() => toggleSelected(String(row.id))}
+                className="h-4 w-4"
+              />
+            ),
+          } satisfies DataTableColumn<RawBarangKeluar>,
+        ]
+      : []),
     { key: 'date', header: 'Tanggal', render: (row) => formatDate(row.tanggal) },
     { key: 'code', header: 'Nomor Pengeluaran', render: (row) => row.nomorPengeluaran },
     { key: 'gudang', header: 'Gudang', render: (row) => row.gudang?.nama ?? '-' },
@@ -468,7 +661,12 @@ export function BarangKeluarContent(): React.JSX.Element {
       header: 'Status',
       render: (row) => {
         const meta = GENERIC_STATUS_META[row.status] ?? { label: row.status, variant: 'neutral' as const };
-        return <Badge label={meta.label} variant={meta.variant} />;
+        return (
+          <div className="flex items-center gap-1.5">
+            <Badge label={meta.label} variant={meta.variant} />
+            {row.isProtected ? <Lock className="h-3.5 w-3.5 text-textMuted" aria-label="Dikunci" /> : null}
+          </div>
+        );
       },
     },
     {
@@ -485,7 +683,7 @@ export function BarangKeluarContent(): React.JSX.Element {
           >
             <Eye className="h-3.5 w-3.5" />
           </button>
-          {row.status === 'draft' && canEditBK ? (
+          {row.status === 'draft' && canEditBK && !row.isProtected ? (
             <>
               <button
                 type="button"
@@ -505,7 +703,7 @@ export function BarangKeluarContent(): React.JSX.Element {
               </button>
             </>
           ) : null}
-          {row.status === 'draft' && isStaff ? (
+          {row.status === 'draft' && isStaff && !row.isProtected ? (
             <button
               type="button"
               onClick={() => handleDelete(row)}
@@ -513,6 +711,16 @@ export function BarangKeluarContent(): React.JSX.Element {
               className="rounded p-1 text-textMuted hover:bg-dangerBg hover:text-dangerText"
             >
               <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {isSuperAdmin ? (
+            <button
+              type="button"
+              onClick={() => handleToggleProtect(row)}
+              title={row.isProtected ? 'Buka kunci' : 'Kunci (Protect)'}
+              className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark"
+            >
+              {row.isProtected ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
             </button>
           ) : null}
         </div>
@@ -548,7 +756,7 @@ export function BarangKeluarContent(): React.JSX.Element {
         onRowAction={handleRowAction}
         module="barang_keluar"
 
-        visibleActions={['add', 'export', 'print']}
+        visibleActions={['add', 'change', 'delete', 'export', 'print', 'modify', 'protect']}
         serverPagination={serverPagination}
         toolbar={
           <div className="flex flex-wrap items-center gap-2">
@@ -558,6 +766,34 @@ export function BarangKeluarContent(): React.JSX.Element {
               placeholder="Semua Kategori"
               options={(kategoriList ?? []).map((k) => ({ label: k.nama, value: String(k.id) }))}
               className="w-44"
+            />
+            <Select
+              value={filterBarangId}
+              onChange={(e) => setFilterBarangId(e.target.value)}
+              placeholder="Filter SKU"
+              options={(barangList?.data ?? []).map((b) => ({ label: b.sku, value: b.id }))}
+              className="w-44"
+            />
+            <Select
+              value={filterBarangId}
+              onChange={(e) => setFilterBarangId(e.target.value)}
+              placeholder="Filter Nama Barang"
+              options={(barangList?.data ?? []).map((b) => ({ label: b.name, value: b.id }))}
+              className="w-52"
+            />
+            <Select
+              value={filterMerek}
+              onChange={(e) => setFilterMerek(e.target.value)}
+              placeholder="Semua Merek"
+              options={merekOptions.map((m) => ({ label: m, value: m }))}
+              className="w-40"
+            />
+            <Select
+              value={filterTipe}
+              onChange={(e) => setFilterTipe(e.target.value)}
+              placeholder="Semua Tipe"
+              options={tipeOptions.map((t) => ({ label: t, value: t }))}
+              className="w-40"
             />
             <TableSearchInput value={searchInput} onChange={setSearchInput} placeholder="Cari nomor pengeluaran......" />
           </div>
@@ -595,14 +831,22 @@ export function BarangKeluarContent(): React.JSX.Element {
         <div className="flex flex-col gap-3 rounded-md border border-borderSoft p-4">
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-text">Daftar Barang</span>
-            <button
-              type="button"
-              onClick={() => setItemRows((prev) => [...prev, { ...EMPTY_ITEM_ROW, key: nextRowKey() }])}
-              className="flex items-center gap-1 text-xs font-semibold text-accentDark hover:underline"
-            >
-              <Plus className="h-3.5 w-3.5" /> Tambah Baris
-            </button>
+            {editingId ? null : (
+              <button
+                type="button"
+                onClick={() => setItemRows((prev) => [...prev, { ...EMPTY_ITEM_ROW, key: nextRowKey() }])}
+                className="flex items-center gap-1 text-xs font-semibold text-accentDark hover:underline"
+              >
+                <Plus className="h-3.5 w-3.5" /> Tambah Baris
+              </button>
+            )}
           </div>
+          {editingId ? (
+            <p className="-mt-1 text-xs text-textMuted">
+              Mode Ubah cuma untuk mengubah data barang yang sudah ada di dokumen ini (qty/harga). Untuk menambah
+              barang baru, buat dokumen baru lewat tombol Add, atau lihat rincian dokumen lewat ikon mata.
+            </p>
+          ) : null}
 
           {itemRows.map((row, index) => (
             <div
@@ -611,20 +855,23 @@ export function BarangKeluarContent(): React.JSX.Element {
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-textMuted">Baris {index + 1}</span>
-                <button
-                  type="button"
-                  onClick={() => removeItemRow(index)}
-                  disabled={itemRows.length === 1}
-                  className="flex items-center gap-1 text-xs font-medium text-dangerText hover:underline disabled:cursor-not-allowed disabled:opacity-30"
-                >
-                  <X className="h-3 w-3" /> Hapus baris
-                </button>
+                {editingId ? null : (
+                  <button
+                    type="button"
+                    onClick={() => removeItemRow(index)}
+                    disabled={itemRows.length === 1}
+                    className="flex items-center gap-1 text-xs font-medium text-dangerText hover:underline disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    <X className="h-3 w-3" /> Hapus baris
+                  </button>
+                )}
               </div>
               <Select
                 label="Barang"
                 value={row.barangId}
                 onChange={(e) => updateItemRow(index, { barangId: e.target.value })}
-                placeholder="Pilih barang"
+                placeholder={barangList === undefined ? 'Memuat daftar barang...' : 'Pilih barang'}
+                disabled={barangList === undefined}
                 options={(barangList?.data ?? []).map((b) => {
                   const details = [b.merek, b.tipe].filter(Boolean).join(' ');
                   const detailsText = details ? ` (${details})` : '';
@@ -634,6 +881,13 @@ export function BarangKeluarContent(): React.JSX.Element {
                   };
                 })}
               />
+              <button
+                type="button"
+                onClick={() => setQuickAddForRowIndex(index)}
+                className="-mt-1 flex items-center gap-1 self-start text-xs font-semibold text-accentDark hover:underline"
+              >
+                <Plus className="h-3 w-3" /> Barang belum ada di daftar? Tambah baru
+              </button>
               <NumberField
                 label="Qty"
                 value={row.qty}
@@ -683,6 +937,10 @@ export function BarangKeluarContent(): React.JSX.Element {
                     <span className="text-xs font-normal text-textMuted">
                       ({it.qty} unit — {options.length} tersedia di gudang ini)
                     </span>
+                  </span>
+                  <span className="text-[11px] text-textMuted">
+                    Nomor seri sudah disarankan otomatis berdasarkan urutan FIFO (unit paling lama tercatat keluar
+                    duluan) — ganti manual kalau memang perlu unit tertentu.
                   </span>
                   <datalist id={datalistId}>
                     {options.map((sn) => (
@@ -760,6 +1018,9 @@ export function BarangKeluarContent(): React.JSX.Element {
                       )}
                     </div>
                   ) : null}
+                  {detailDoc && detailDoc.status === 'selesai' ? (
+                    <SpesifikasiEditor item={it} onSave={(payload) => handleSaveSpesifikasi(it.id, payload)} />
+                  ) : null}
                 </div>
               ))
             )}
@@ -767,6 +1028,18 @@ export function BarangKeluarContent(): React.JSX.Element {
         )}
       </Modal>
       {exportDialog}
+
+      <QuickAddItemModal
+        isOpen={quickAddForRowIndex !== null}
+        onClose={() => setQuickAddForRowIndex(null)}
+        kategoriList={kategoriList}
+        satuanList={satuanList}
+        onCreated={(item) => {
+          if (quickAddForRowIndex === null) return;
+          updateItemRow(quickAddForRowIndex, { barangId: item.id });
+          void mutateBarangList();
+        }}
+      />
     </PageShell>
   );
 }

@@ -1,12 +1,13 @@
 'use client';
 
+import React from 'react';
 import { useEffect, useState } from 'react';
+import type { JSX } from 'react';
 import useSWR from 'swr';
 import { toast } from 'sonner';
-import { CheckCircle2, XCircle, Trash2, History } from 'lucide-react';
+import { CheckCircle2, XCircle, Trash2, History, Pencil } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
-import { Card } from '@/component/ui/Card';
 import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { Input, Select } from '@/component/ui/FormControls';
 import { ScanSnButton } from '@/component/ui/ScanSnButton';
@@ -18,14 +19,15 @@ import { useAuth } from '@/auth/AuthContext';
 import { barangSerialApi, itemsApi, warehousesApi } from '@/lib/api/modules';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { formatDate } from '@/lib/utils/format';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { PAGE_LIMIT_OPTIONS } from '@/lib/hooks/useServerPaginatedList';
 import { BARANG_SERIAL_STATUS_META } from '@/lib/utils/status';
-import type { BarangSerialUnit } from '@/types';
+import type { BarangSerialUnit, Item } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
-export function BarangSerialContent(): React.JSX.Element {
+export function BarangSerialContent(): JSX.Element {
   const { user } = useAuth();
   const isStaff = user?.role === 'super_admin' || user?.role === 'admin';
   const confirm = useConfirm();
@@ -38,8 +40,20 @@ export function BarangSerialContent(): React.JSX.Element {
   const { data: barangList } = useSWR('barang-serialized-list', () =>
     itemsApi.list({ pageSize: 200 }),
   );
-  const serializedItems = (barangList?.data ?? []).filter((b) => b.isSerialized);
+  const serializedItems = (barangList?.data ?? []).filter((b: Item) => b.isSerialized);
   const { data: gudangList } = useSWR('gudang-list-for-serial', () => warehousesApi.list());
+
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createBarangId, setCreateBarangId] = useState('');
@@ -79,14 +93,44 @@ export function BarangSerialContent(): React.JSX.Element {
     }
   }
 
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingUnit, setEditingUnit] = useState<BarangSerialUnit | null>(null);
+  const [editGudangId, setEditGudangId] = useState('');
+  const [editCatatan, setEditCatatan] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  function openEditModal(row: BarangSerialUnit): void {
+    setEditingUnit(row);
+    setEditGudangId(row.warehouseId ?? '');
+    setEditCatatan(row.catatan ?? '');
+    setIsEditModalOpen(true);
+  }
+
+  async function handleSaveEdit(): Promise<void> {
+    if (!editingUnit) return;
+    if (!editGudangId) {
+      toast.error('Gudang wajib dipilih.');
+      return;
+    }
+    setIsSavingEdit(true);
+    try {
+      await barangSerialApi.update(editingUnit.id, { gudangId: editGudangId, catatan: editCatatan });
+      toast.success('Unit berhasil diperbarui.');
+      setIsEditModalOpen(false);
+      setEditingUnit(null);
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal memperbarui unit.'));
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }
+
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState<number>(PAGE_LIMIT_OPTIONS[0]);
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Reset ke halaman 1 saat filter/search/limit berubah — disesuaikan SAAT
-  // render (bukan lewat useEffect terpisah) supaya tidak memicu cascading
-  // render tambahan dari setState di dalam efek.
   const filterResetKey = `${barangId}::${gudangId}::${status}::${searchTerm}::${limit}`;
   const [prevFilterResetKey, setPrevFilterResetKey] = useState(filterResetKey);
   if (filterResetKey !== prevFilterResetKey) {
@@ -176,17 +220,56 @@ export function BarangSerialContent(): React.JSX.Element {
     }
   }
 
+  function handleBulkChange(selectedRows: BarangSerialUnit[]): void {
+    if (!isBulkMode) {
+      toast('Aktifkan "Modify" dulu untuk memilih satu unit yang mau diubah.');
+      return;
+    }
+    if (selectedRows.length !== 1) {
+      toast('Pilih tepat SATU unit untuk diubah.');
+      return;
+    }
+    openEditModal(selectedRows[0]);
+  }
+
+  async function handleBulkDelete(selectedRows: BarangSerialUnit[]): Promise<void> {
+    if (!isBulkMode || selectedRows.length === 0) {
+      toast('Aktifkan "Modify" dulu, lalu pilih satu atau beberapa unit yang mau dihapus.');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Hapus Unit Terpilih',
+      message: `Hapus ${selectedRows.length} unit terpilih? Gunakan ini hanya untuk data yang salah input.`,
+      confirmLabel: 'Ya, Hapus',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await Promise.all(selectedRows.map((r) => barangSerialApi.remove(r.id)));
+      toast.success(`${selectedRows.length} unit berhasil dihapus.`);
+      setSelectedIds(new Set());
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Sebagian/semua unit gagal dihapus.'));
+    }
+  }
+
   const EXPORT_COLUMNS = [
     { header: 'Nomor Seri', accessor: (r: BarangSerialUnit) => r.serialNumber },
     { header: 'Barang', accessor: (r: BarangSerialUnit) => r.barangNama ?? `#${r.barangId}` },
     { header: 'Status', accessor: (r: BarangSerialUnit) => BARANG_SERIAL_STATUS_META[r.status]?.label ?? r.status },
     { header: 'Gudang', accessor: (r: BarangSerialUnit) => r.warehouseName ?? '-' },
-    { header: 'Diperbarui', accessor: (r: BarangSerialUnit) => formatDate(r.updatedAt) },
+    { header: 'Diperbarui', accessor: (r: BarangSerialUnit) => formatTanggalPanjang(r.updatedAt) },
   ];
   const PDF_META = {
     title: 'Rekap Data Barang yang memiliki Serial Number',
     subtitle: 'Pengelolaan / Unit Barang (Nomor Seri)',
     description: 'Kumpulan Data barang fisik yang memiliki Serial Number (SN), beserta status & lokasi terkini.',
+  };
+  const SERIAL_GRANULARITY: GranularityConfig<BarangSerialUnit> = {
+    dateAccessor: (r) => r.updatedAt,
+    sumHeaders: [],
+    groupKeyHeader: 'Barang',
   };
 
   async function fetchAllForExport(): Promise<BarangSerialUnit[] | null> {
@@ -212,13 +295,10 @@ export function BarangSerialContent(): React.JSX.Element {
 
   async function handleExport(): Promise<void> {
     const all = await fetchAllForExport();
-    if (all) requestExport(all, EXPORT_COLUMNS, 'daftar-unit-barang', PDF_META);
+    if (all) requestExport(all, EXPORT_COLUMNS, 'daftar-unit-barang', PDF_META, SERIAL_GRANULARITY);
   }
 
   async function handlePrint(): Promise<void> {
-    // Cetak HANYA data halaman yang sedang tampil (offset/limit aktif),
-    // bukan menarik ulang seluruh data yang cocok filter — konsisten
-    // dengan perilaku tombol Print di menu lain.
     printRowsToPdf(rows, EXPORT_COLUMNS, {
       ...PDF_META,
       subtitle: `${PDF_META.subtitle} — Halaman ${page}/${totalPages} (${rows.length} dari ${listResult?.total ?? rows.length} unit)`,
@@ -226,17 +306,39 @@ export function BarangSerialContent(): React.JSX.Element {
     });
   }
 
-  function handleRowAction(action: TableRowAction): void {
-    if (action === 'add') {
-      openCreateModal();
-    } else if (action === 'export') {
-      handleExport();
-    } else if (action === 'print') {
-      handlePrint();
-    }
+  async function handleRowAction(action: TableRowAction): Promise<void> {
+    const selectedRows = rows.filter((r) => selectedIds.has(r.id));
+    const actions: Partial<Record<TableRowAction, () => void | Promise<void>>> = {
+      add: openCreateModal,
+      export: handleExport,
+      print: handlePrint,
+      modify: () => {
+        setIsBulkMode((prev) => !prev);
+        setSelectedIds(new Set());
+      },
+      change: () => handleBulkChange(selectedRows),
+      delete: () => handleBulkDelete(selectedRows),
+    };
+    await actions[action]?.();
   }
 
   const columns: DataTableColumn<BarangSerialUnit>[] = [
+    ...(isBulkMode
+      ? [
+          {
+            key: 'select',
+            header: '',
+            render: (row: BarangSerialUnit) => (
+              <input
+                type="checkbox"
+                checked={selectedIds.has(row.id)}
+                onChange={() => toggleSelected(row.id)}
+                className="h-4 w-4"
+              />
+            ),
+          } satisfies DataTableColumn<BarangSerialUnit>,
+        ]
+      : []),
     { key: 'sn', header: 'Nomor Seri', render: (row) => <span className="font-mono text-xs">{row.serialNumber}</span> },
     { key: 'barang', header: 'Barang', render: (row) => row.barangNama ?? `#${row.barangId}` },
     { key: 'merek', header: 'Merek', render: (row) => row.barangMerek ?? '-' },
@@ -297,6 +399,14 @@ export function BarangSerialContent(): React.JSX.Element {
                 ) : null}
                 <button
                   type="button"
+                  onClick={() => openEditModal(row)}
+                  title="Ubah"
+                  className="rounded p-1 text-textMuted hover:bg-infoBg hover:text-infoText"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleDelete(row)}
                   title="Hapus"
                   className="rounded p-1 text-textMuted hover:bg-dangerBg hover:text-dangerText"
@@ -320,20 +430,13 @@ export function BarangSerialContent(): React.JSX.Element {
         ]}
       />
 
-      {serializedItems.length === 0 ? (
-        <Card>
-          <h3 className="mb-1 text-sm font-semibold text-text">Belum ada barang yang dilacak lewat SN</h3>
-          <p className="text-xs text-textMuted">
-            Aktifkan &quot;Catat per Unit Fisik (Nomor Seri)&quot; di Kelola Barang untuk barang yang unit
-            fisiknya perlu dibedakan (mis. ONT/modem), unit baru akan muncul di sini secara otomatis setelah
-            dokumen Barang Masuk untuk barang tersebut diselesaikan.
-          </p>
-        </Card>
-      ) : null}
-
       <DataTable
         title="Daftar Unit"
-        description="Cari lewat nomor seri, atau saring per barang/gudang/status di bawah."
+        description={
+          isBulkMode
+            ? `Mode Modify aktif (${selectedIds.size} dipilih). Pilih unit per baris lalu gunakan Change/Delete di atas.`
+            : 'Cari lewat nomor seri, atau saring per barang/gudang/status di bawah.'
+        }
         columns={columns}
         rows={rows}
         getRowId={(row) => row.id}
@@ -341,7 +444,7 @@ export function BarangSerialContent(): React.JSX.Element {
         isLoading={isLoading}
         errorMessage={listErrorMessage(error)}
         onRowAction={handleRowAction}
-        visibleActions={['add', 'export', 'print']}
+        visibleActions={['add', 'export', 'print', 'modify', 'change', 'delete']}
         module="kelola_barang"
         serverPagination={{
           page,
@@ -364,9 +467,16 @@ export function BarangSerialContent(): React.JSX.Element {
             <Select
               value={barangId}
               onChange={(e) => setBarangId(e.target.value)}
-              placeholder="Semua Barang"
-              options={serializedItems.map((b) => ({ label: `${b.sku} — ${b.name}`, value: b.id }))}
-              className="w-56"
+              placeholder="Filter SKU"
+              options={serializedItems.map((b) => ({ label: b.sku, value: b.id }))}
+              className="w-40"
+            />
+            <Select
+              value={barangId}
+              onChange={(e) => setBarangId(e.target.value)}
+              placeholder="Filter Nama Barang"
+              options={serializedItems.map((b) => ({ label: b.name, value: b.id }))}
+              className="w-48"
             />
             <Select
               value={gudangId}
@@ -435,6 +545,37 @@ export function BarangSerialContent(): React.JSX.Element {
             label="Catatan (opsional)"
             value={createCatatan}
             onChange={(e) => setCreateCatatan(e.target.value)}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isEditModalOpen}
+        title={`Ubah Unit — ${editingUnit?.serialNumber ?? ''}`}
+        onClose={() => setIsEditModalOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setIsEditModalOpen(false)}>
+              Batal
+            </Button>
+            <Button onClick={handleSaveEdit} loading={isSavingEdit}>
+              Simpan Perubahan
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Select
+            label="Gudang"
+            value={editGudangId}
+            onChange={(e) => setEditGudangId(e.target.value)}
+            placeholder="Pilih gudang lokasi unit"
+            options={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
+          />
+          <Input
+            label="Catatan (opsional)"
+            value={editCatatan}
+            onChange={(e) => setEditCatatan(e.target.value)}
           />
         </div>
       </Modal>

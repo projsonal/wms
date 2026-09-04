@@ -1,0 +1,59 @@
+name: Deploy Frontend
+ 
+on:
+  push:
+    branches: [main]
+ 
+jobs:
+  build-check:
+    name: Build & Type Check (CI sanity check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+ 
+      - name: Install dependencies
+        run: npm ci
+ 
+      - name: Type check
+        run: npm run type-check
+ 
+      - name: Lint
+        run: npm run lint
+ 
+      - name: Build (sanity check only — hasil build ini TIDAK dipakai deploy)
+        run: npm run build
+ 
+  deploy:
+    name: Deploy to VPS
+    needs: build-check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+ 
+      - name: Add VPS to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.VPS_PORT || 22 }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+ 
+      - name: Pull, build, and restart on VPS
+        run: |
+          ssh -p "${{ secrets.VPS_PORT || 22 }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" '
+            set -e
+            cd /opt/inventory/frontend
+            git pull origin main
+            npm ci
+            npm run build
+            pm2 restart inventory-frontend --update-env
+            sleep 2
+            curl -sf http://127.0.0.1:3000/api/inventory-backend/human-check > /dev/null || (echo "Health check gagal!" && exit 1)
+          '

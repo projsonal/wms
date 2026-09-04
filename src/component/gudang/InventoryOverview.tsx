@@ -24,6 +24,8 @@ export function InventoryOverviewContent(): React.JSX.Element {
   const columns: DataTableColumn<StokGudangRecord>[] = [
     { key: 'sku', header: 'SKU', render: (row) => row.sku },
     { key: 'item', header: 'Nama Barang', render: (row) => row.itemName },
+    { key: 'merek', header: 'Merek', render: (row) => row.merek || '-' },
+    { key: 'tipe', header: 'Tipe', render: (row) => row.tipe || '-' },
     { key: 'warehouse', header: 'Gudang', render: (row) => row.warehouseName },
     {
       key: 'qty',
@@ -36,6 +38,8 @@ export function InventoryOverviewContent(): React.JSX.Element {
   const INVENTORY_EXPORT_COLUMNS = [
     { header: 'SKU', accessor: (row: StokGudangRecord) => row.sku },
     { header: 'Nama Barang', accessor: (row: StokGudangRecord) => row.itemName },
+    { header: 'Merek', accessor: (row: StokGudangRecord) => row.merek ?? '-' },
+    { header: 'Tipe', accessor: (row: StokGudangRecord) => row.tipe ?? '-' },
     { header: 'Gudang', accessor: (row: StokGudangRecord) => row.warehouseName },
     { header: 'Kuantitas', accessor: (row: StokGudangRecord) => row.quantity },
   ];

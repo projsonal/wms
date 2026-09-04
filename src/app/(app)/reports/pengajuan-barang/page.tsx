@@ -6,9 +6,9 @@ export default function Page(): React.JSX.Element {
   return (
     <RoleGuard allowedRoles={STAFF_ROLES}>
       <ReportPageTemplate
-        title="Laporan Barang Retur"
-        breadcrumb="Laporan / Laporan Barang Retur"
-        reportType="Barang Retur"
+        title="Laporan Pengajuan Barang"
+        breadcrumb="Laporan / Laporan Pengajuan Barang"
+        reportType="Pengajuan Barang"
       />
     </RoleGuard>
   );

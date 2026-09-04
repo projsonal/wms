@@ -3,28 +3,31 @@
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { toast } from 'sonner';
-import { Pencil, Trash2, Lock, Unlock, CheckCircle2, XCircle, Tags, UserCog } from 'lucide-react';
+import { Pencil, Trash2, Lock, Unlock, CheckCircle2, XCircle, Tags, UserCog, Eye } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
-import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
+import { DataTable, type DataTableColumn, type ServerPaginationConfig } from '@/component/ui/DataTable';
 import { Modal } from '@/component/ui/Modal';
-import { Input, NumberField, CurrencyField, Select, SelectWithCreate } from '@/component/ui/FormControls';
+import { CurrencyField, Input, NumberField, Select, SelectWithCreate } from '@/component/ui/FormControls';
+import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
-import { itemsApi, kategoriApi, satuanApi, usersApi } from '@/lib/api/modules';
+import { itemsApi, kategoriApi, satuanApi, usersApi, warehousesApi, barangSerialApi, spesifikasiApi, goodsOutApi } from '@/lib/api/modules';
+import type { RawBarangDetailStok, RawSpesifikasiListRow } from '@/lib/api/raw-types';
 import { useServerPaginatedList } from '@/lib/hooks/useServerPaginatedList';
 import { useDebouncedSearch } from '@/lib/hooks/useDebouncedSearch';
 import { TableSearchInput } from '@/component/ui/TableSearchInput';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils/format';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { usePermissions } from '@/lib/hooks/usePermissions';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { printSkuLabels } from '@/lib/utils/print-sku-label';
 import { ITEM_STATUS_META } from '@/lib/utils/status';
 import { resolveEquipmentAbbreviation } from '@/lib/utils/equipment-abbreviations';
-import type { Item } from '@/types';
+import type { Item, BarangSerialUnit, StatusBadgeVariant } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
 const EMPTY_FORM: Partial<Item> = {
@@ -39,6 +42,7 @@ const EMPTY_FORM: Partial<Item> = {
   isSerialized: false,
   merek: '',
   tipe: '',
+  warehouseId: '',
 };
 
 const CONFIRM_DELETE_MESSAGE = 'Apakah yakin ingin menghapus data ini?';
@@ -46,28 +50,223 @@ const CONFIRM_PROTECT_LOCK_MESSAGE =
   'Apakah Anda yakin untuk melindungi/mengunci data ini supaya tidak bisa dieksekusi (diubah atau dihapus) oleh role karyawan?';
 const CONFIRM_PROTECT_UNLOCK_MESSAGE = 'Apakah Anda yakin ingin membuka kunci data ini?';
 
+function getDaftarTabDescription(isBulkMode: boolean, selectedCount: number, delegatedToMe: boolean): string {
+  if (isBulkMode) {
+    return `Mode Modify aktif ${selectedCount}. Silakan Pilih data per baris lalu gunakan Change/Delete/Protect di atas.`;
+  }
+  if (delegatedToMe) {
+    return 'Barang yang didelegasikan (ditugaskan) super admin kepadamu untuk dicek fisik & diproses.';
+  }
+  return 'Seluruh SKU yang terdaftar di gudang';
+}
+
+// detailStokSerialsKey/fetchDetailStokSerials: dipisah dari body komponen
+// (bukan cuma ditulis inline di argumen useSWR) supaya kompleksitas
+// kognitif ItemsManagementContent tidak melebihi batas linter.
+function detailStokSerialsKey(row: Item | null): [string, string] | null {
+  return row?.isSerialized ? ['barang-detail-stok-serials', row.id] : null;
+}
+
+function fetchDetailStokSerials(row: Item | null) {
+  if (!row) return null;
+  return barangSerialApi.list({ barangId: row.id, pageSize: 200 });
+}
+
+interface KelolaBarangDaftarTabProps {
+  columns: DataTableColumn<Item>[];
+  rows: Item[];
+  isLoading: boolean;
+  errorMessage?: string;
+  isBulkMode: boolean;
+  selectedIds: Set<string>;
+  onRowAction: (action: TableRowAction) => void | Promise<void>;
+  onBulkPrintLabels: (rows: Item[]) => void;
+  searchInput: string;
+  onSearchInputChange: (value: string) => void;
+  serverPagination: ServerPaginationConfig;
+  isAdminRole: boolean;
+  delegatedToMe: boolean;
+  onToggleDelegatedToMe: () => void;
+  filterMerek: string;
+  onFilterMerekChange: (value: string) => void;
+  merekOptions: string[];
+  filterTipe: string;
+  onFilterTipeChange: (value: string) => void;
+  tipeOptions: string[];
+}
+
+function KelolaBarangDaftarTab({
+  columns,
+  rows,
+  isLoading,
+  errorMessage,
+  isBulkMode,
+  selectedIds,
+  onRowAction,
+  onBulkPrintLabels,
+  searchInput,
+  onSearchInputChange,
+  serverPagination,
+  isAdminRole,
+  delegatedToMe,
+  onToggleDelegatedToMe,
+  filterMerek,
+  onFilterMerekChange,
+  merekOptions,
+  filterTipe,
+  onFilterTipeChange,
+  tipeOptions,
+}: KelolaBarangDaftarTabProps): React.JSX.Element {
+  const description = getDaftarTabDescription(isBulkMode, selectedIds.size, delegatedToMe);
+  return (
+    <DataTable
+      title="Daftar Barang"
+      description={description}
+      columns={columns}
+      rows={rows}
+      getRowId={(row) => row.id}
+      isLoading={isLoading}
+      errorMessage={errorMessage}
+      onRowAction={onRowAction}
+      module="kelola_barang"
+      serverPagination={serverPagination}
+      toolbar={
+        <div className="flex flex-wrap items-center gap-2">
+          {isBulkMode ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => onBulkPrintLabels(rows.filter((r) => selectedIds.has(r.id)))}
+              disabled={selectedIds.size === 0}
+            >
+              <Tags className="mr-1.5 h-3.5 w-3.5" /> Cetak Label Terpilih
+            </Button>
+          ) : null}
+          {isAdminRole ? (
+            <button
+              type="button"
+              onClick={onToggleDelegatedToMe}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                delegatedToMe
+                  ? 'border-accentDark bg-accentDark text-white'
+                  : 'border-borderSoft bg-surfaceAlt text-textMuted hover:text-text'
+              }`}
+            >
+              Didelegasikan ke Saya
+            </button>
+          ) : null}
+          <Select
+            value={filterMerek}
+            onChange={(e) => onFilterMerekChange(e.target.value)}
+            placeholder="Semua Merek"
+            options={merekOptions.map((m) => ({ label: m, value: m }))}
+            className="w-40"
+          />
+          <Select
+            value={filterTipe}
+            onChange={(e) => onFilterTipeChange(e.target.value)}
+            placeholder="Semua Tipe"
+            options={tipeOptions.map((t) => ({ label: t, value: t }))}
+            className="w-40"
+          />
+          <TableSearchInput value={searchInput} onChange={onSearchInputChange} placeholder="Cari SKU/nama barang......" />
+        </div>
+      }
+    />
+  );
+}
+
+interface HargaBeliFieldProps {
+  isEditing: boolean;
+  stock: number;
+  price: number;
+  onPriceChange: (value: number) => void;
+}
+
+// Harga Beli SENGAJA tidak lagi jadi field yang selalu tampil di form
+// Tambah/Ubah Barang (dulu selalu ada, sekarang dipindah fokusnya) — nilai
+// barang normalnya sudah otomatis dihitung sistem (rata-rata tertimbang)
+// dari harga satuan di setiap dokumen Barang Masuk saat stok diterima,
+// jadi tidak perlu diisi manual tiap kali. Field manual cuma muncul untuk
+// kasus SATU-satunya yang memang butuh: mendaftarkan barang yang stok
+// fisiknya sudah ada duluan (Stok Awal > 0) sebelum sempat lewat Barang
+// Masuk, supaya nilai stok itu tidak tercatat Rp 0 di laporan. Untuk
+// penilaian aset per unit/per barang yang lebih detail (bukan cuma harga
+// beli rata-rata), gunakan field "Nilai Aset" di menu Manajemen Aset Barang.
+function HargaBeliField({ isEditing, stock, price, onPriceChange }: HargaBeliFieldProps): React.JSX.Element | null {
+  if (!isEditing && stock > 0) {
+    return (
+      <div>
+        <CurrencyField label="Harga Beli Awal (untuk Stok Awal)" value={price} onValueChange={onPriceChange} />
+        <p className="mt-1 text-xs text-textMuted">
+          Dipakai sebagai dasar nilai stok awal yang diisi di atas. Untuk stok berikutnya, harga
+          rata-rata akan diperbarui otomatis dari dokumen Barang Masuk.
+        </p>
+      </div>
+    );
+  }
+  if (isEditing) {
+    return (
+      <div>
+        <p className="text-sm font-medium text-text">Harga Beli (rata-rata tertimbang)</p>
+        <p className="mt-1.5 rounded-md border border-borderSoft bg-neutralBg px-4 py-2.5 text-sm text-text">
+          {formatCurrency(price)}
+        </p>
+        <p className="mt-1 text-xs text-textMuted">
+          Diperbarui otomatis oleh sistem dari harga satuan di setiap dokumen Barang Masuk — tidak
+          diedit manual dari sini supaya perhitungan nilai stok tetap akurat.
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
 export function ItemsManagementContent(): React.JSX.Element {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
   const isStaff = user?.role === 'super_admin' || user?.role === 'admin';
   const { can } = usePermissions();
   const canEditItem = isStaff || can('kelola_barang', 'edit');
+  const canEditSpesifikasi = isStaff || can('barang_keluar', 'edit');
   const confirm = useConfirm();
   const { requestExport, dialog: exportDialog } = useExportFormat();
+
+  const isAdminRole = user?.role === 'admin';
+  const [delegatedToMe, setDelegatedToMe] = useState(false);
+
+  const [filterMerek, setFilterMerek] = useState('');
+  const [filterTipe, setFilterTipe] = useState('');
 
   const { input: searchInput, setInput: setSearchInput, term: searchTerm } = useDebouncedSearch();
   const { rows, isLoading, error, mutate, serverPagination } = useServerPaginatedList(
     'items',
     itemsApi,
-    { search: searchTerm || undefined },
+    {
+      search: searchTerm || undefined,
+      delegated_to_me: delegatedToMe ? 'true' : undefined,
+      merek: filterMerek || undefined,
+      tipe: filterTipe || undefined,
+    },
   );
   const { data: kategoriList, mutate: mutateKategori } = useSWR('kategori-list', () => kategoriApi.list());
   const { data: satuanList, mutate: mutateSatuan } = useSWR('satuan-list', () => satuanApi.list());
+  const { data: gudangList } = useSWR('warehouses-for-kelola-barang', () => warehousesApi.list({ pageSize: 100 }));
+  // Daftar barang lengkap (bukan yang lagi terfilter/terpaginasi) cuma buat
+  // membangun opsi dropdown Merek/Tipe yang mencerminkan seluruh data, bukan
+  // cuma barang di halaman yang sedang tampil.
+  const { data: allItemsForFilters } = useSWR('items-all-for-filters', () => itemsApi.list({ pageSize: 500 }));
+  const merekOptions = Array.from(new Set((allItemsForFilters?.data ?? []).map((b) => b.merek).filter(Boolean))) as string[];
+  const tipeOptions = Array.from(new Set((allItemsForFilters?.data ?? []).map((b) => b.tipe).filter(Boolean))) as string[];
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Item>>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
+  // originalStock: nilai stok saat modal Ubah Barang dibuka — dipakai untuk
+  // mendeteksi apakah user benar-benar mengoreksi stok (supaya gudang
+  // tujuan koreksi cuma wajib dipilih kalau stok memang diubah, real-time-safe).
+  const [originalStock, setOriginalStock] = useState(0);
 
   const [beratKgText, setBeratKgText] = useState('');
 
@@ -104,6 +303,33 @@ export function ItemsManagementContent(): React.JSX.Element {
       setIsDelegating(false);
     }
   }
+
+  async function handleBatalkanDelegasi(): Promise<void> {
+    if (!delegatingRow) return;
+    setIsDelegating(true);
+    try {
+      await itemsApi.batalkanDelegasi(delegatingRow.id);
+      toast.success('Delegasi berhasil dibatalkan.');
+      setDelegatingRow(null);
+      await mutate();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal membatalkan delegasi.'));
+    } finally {
+      setIsDelegating(false);
+    }
+  }
+
+  const [detailStokRow, setDetailStokRow] = useState<Item | null>(null);
+  const { data: detailStok, isLoading: isLoadingDetailStok } = useSWR(
+    detailStokRow ? ['barang-detail-stok', detailStokRow.id] : null,
+    () => (detailStokRow ? itemsApi.detailStok(detailStokRow.id) : null),
+  );
+  // Cuma di-fetch untuk barang isSerialized — daftar nomor seri per unit,
+  // ditampilkan sebagai tabel tambahan di modal Detail Stok.
+  const { data: detailStokSerials, isLoading: isLoadingDetailStokSerials } = useSWR(
+    detailStokSerialsKey(detailStokRow),
+    () => fetchDetailStokSerials(detailStokRow),
+  );
 
   const [skuMode, setSkuMode] = useState<'otomatis' | 'manual'>('otomatis');
   const [isGeneratingSku, setIsGeneratingSku] = useState(false);
@@ -172,6 +398,7 @@ export function ItemsManagementContent(): React.JSX.Element {
   function openCreateModal(): void {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setOriginalStock(0);
     setBeratKgText('');
     setSkuMode('otomatis');
     setSkuAvailability('idle');
@@ -186,6 +413,7 @@ export function ItemsManagementContent(): React.JSX.Element {
     }
     setEditingId(row.id);
     setSkuMode('manual');
+    setOriginalStock(row.stock);
     setForm({
       name: row.name,
       sku: row.sku,
@@ -199,6 +427,7 @@ export function ItemsManagementContent(): React.JSX.Element {
       isSerialized: row.isSerialized ?? false,
       merek: row.merek ?? '',
       tipe: row.tipe ?? '',
+      warehouseId: '',
     });
     setBeratKgText(
       row.weightGram !== undefined && row.weightGram !== null ? String(row.weightGram / 1000) : '',
@@ -206,21 +435,32 @@ export function ItemsManagementContent(): React.JSX.Element {
     setIsModalOpen(true);
   }
 
-  async function handleSave(): Promise<void> {
+  function getFormValidationError(): string | null {
     if (!form.categoryId || !form.unitId) {
-      toast.error('Kategori dan Satuan wajib dipilih.');
-      return;
+      return 'Kategori dan Satuan wajib dipilih.';
     }
     if (!form.sku?.trim()) {
-      toast.error('SKU wajib diisi — pilih kategori dulu untuk saran otomatis, atau isi manual.');
-      return;
+      return 'SKU wajib diisi — pilih kategori dulu untuk saran otomatis, atau isi manual.';
     }
     if (isGeneratingSku) {
-      toast.error('Tunggu saran SKU selesai dibuat sebentar lagi.');
-      return;
+      return 'Tunggu saran SKU selesai dibuat sebentar lagi.';
     }
     if (skuMode === 'manual' && skuAvailability === 'taken') {
-      toast.error('SKU ini sudah dipakai barang lain — ganti dulu sebelum menyimpan.');
+      return 'SKU ini sudah dipakai barang lain — ganti dulu sebelum menyimpan.';
+    }
+    if (!editingId && (form.stock ?? 0) > 0 && !form.warehouseId) {
+      return 'Stok awal diisi tapi gudang tujuannya belum dipilih — pilih gudang supaya stok ini tercatat di lokasi yang benar.';
+    }
+    if (editingId && (form.stock ?? 0) !== originalStock && !form.warehouseId) {
+      return 'Stok dikoreksi tapi gudang tujuan koreksinya belum dipilih — pilih gudang yang stoknya mau dikoreksi supaya tetap tercatat real-time per gudang.';
+    }
+    return null;
+  }
+
+  async function handleSave(): Promise<void> {
+    const validationError = getFormValidationError();
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
 
@@ -349,17 +589,22 @@ export function ItemsManagementContent(): React.JSX.Element {
     { header: 'Stok', accessor: (r: Item) => r.stock },
     { header: 'Satuan', accessor: (r: Item) => r.unit },
     { header: 'Stok Minimum', accessor: (r: Item) => r.minStock },
-    { header: 'Harga Beli', accessor: (r: Item) => r.price },
     { header: 'Status', accessor: (r: Item) => r.status },
+    { header: 'Tanggal Dibuat', accessor: (r: Item) => formatTanggalPanjang(r.createdAt) },
   ];
   const ITEM_PDF_META = {
-    title: 'Rekap Data Gudang — Kelola Barang',
+    title: 'Rekap Data Kelola Barang',
     subtitle: 'Pengelolaan / Kelola Barang',
-    description: 'Daftar seluruh SKU barang yang terdaftar di gudang, lengkap dengan kategori, stok berjalan, satuan, dan status ketersediaan per tanggal cetak.',
+    description: 'Data keseluruhan di dalam berbagai gudang.',
+  };
+  const ITEM_GRANULARITY: GranularityConfig<Item> = {
+    dateAccessor: (r) => r.createdAt,
+    sumHeaders: ['Stok'],
+    groupKeyHeader: 'SKU',
   };
 
   function handleExport(): void {
-    requestExport(rows, ITEM_EXPORT_COLUMNS, 'daftar-barang', ITEM_PDF_META);
+    requestExport(rows, ITEM_EXPORT_COLUMNS, 'daftar-barang', ITEM_PDF_META, ITEM_GRANULARITY);
   }
 
   function handlePrint(): void {
@@ -510,12 +755,6 @@ export function ItemsManagementContent(): React.JSX.Element {
       render: (row) => `${formatNumber(row.stock)} ${row.unit}`,
     },
     {
-      key: 'price',
-      header: 'Harga',
-      align: 'right',
-      render: (row) => (row.isProtected && !isStaff ? '••••••' : formatCurrency(row.price)),
-    },
-    {
       key: 'status',
       header: 'Status',
       render: (row) => {
@@ -586,6 +825,14 @@ export function ItemsManagementContent(): React.JSX.Element {
           ) : null}
           <button
             type="button"
+            onClick={() => setDetailStokRow(row)}
+            title="Detail Stok Real-time (Masuk/Keluar)"
+            className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark"
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
             onClick={() => handlePrintLabelOne(row)}
             title="Cetak Label Barcode (SKU)"
             className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark"
@@ -628,37 +875,27 @@ export function ItemsManagementContent(): React.JSX.Element {
 
   return (
     <PageShell title="Kelola Barang" breadcrumb="Pengelolaan / Kelola Barang">
-
-      <DataTable
-        title="Daftar Barang"
-        description={
-          isBulkMode
-            ? `Mode Modify aktif ${selectedIds.size}. Silakan Pilih data per baris lalu gunakan Change/Delete/Protect di atas.`
-            : 'Seluruh SKU yang terdaftar di gudang'
-        }
+      <KelolaBarangDaftarTab
         columns={columns}
         rows={rows}
-        getRowId={(row) => row.id}
         isLoading={isLoading}
         errorMessage={listErrorMessage(error)}
+        isBulkMode={isBulkMode}
+        selectedIds={selectedIds}
         onRowAction={handleRowAction}
-        module="kelola_barang"
+        onBulkPrintLabels={handleBulkPrintLabels}
+        searchInput={searchInput}
+        onSearchInputChange={setSearchInput}
         serverPagination={serverPagination}
-        toolbar={
-          <div className="flex flex-wrap items-center gap-2">
-            {isBulkMode ? (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => handleBulkPrintLabels(rows.filter((r) => selectedIds.has(r.id)))}
-                disabled={selectedIds.size === 0}
-              >
-                <Tags className="mr-1.5 h-3.5 w-3.5" /> Cetak Label Terpilih
-              </Button>
-            ) : null}
-            <TableSearchInput value={searchInput} onChange={setSearchInput} placeholder="Cari SKU/nama barang......" />
-          </div>
-        }
+        isAdminRole={isAdminRole}
+        delegatedToMe={delegatedToMe}
+        onToggleDelegatedToMe={() => setDelegatedToMe((prev) => !prev)}
+        filterMerek={filterMerek}
+        onFilterMerekChange={setFilterMerek}
+        merekOptions={merekOptions}
+        filterTipe={filterTipe}
+        onFilterTipeChange={setFilterTipe}
+        tipeOptions={tipeOptions}
       />
 
       <Modal
@@ -719,8 +956,7 @@ export function ItemsManagementContent(): React.JSX.Element {
             {skuMode === 'otomatis' ? (
               <p className="mt-1 text-xs text-textMuted">
                 Format &quot;KATEGORI-TIPE-MEREK-UKURAN-nomor&quot; (mis. Teknologi + ONT + Huawei + berat
-                800gr → &quot;TEK-ONT-HUA-S-0007&quot;). Komponen yang datanya belum diisi (Tipe/Merek/Berat)
-                otomatis dilewati. Pindah ke Manual kalau mau tentukan sendiri.
+                800gr → &quot;TEK-ONT-HUA-S-0007&quot;). 
               </p>
             ) : (
               <>
@@ -770,12 +1006,48 @@ export function ItemsManagementContent(): React.JSX.Element {
                 : 'Isi kalau barang ini sudah punya stok fisik di gudang sebelum didaftarkan (mis. mendigitalisasi stok lama). Kosongkan/0 kalau stok akan ditambah lewat Barang Masuk seperti biasa.'}
             </p>
           </div>
-          <NumberField
-            label="Stok Minimum"
-            value={form.minStock ?? 0}
-            onValueChange={(value) => setForm({ ...form, minStock: value })}
-          />
+          <div>
+            <NumberField
+              label="Stok Minimum"
+              value={form.minStock ?? 0}
+              onValueChange={(value) => setForm({ ...form, minStock: value })}
+            />
+            <p className="mt-1 text-xs text-textMuted">
+              Ambang batas peringatan &quot;Stok Menipis&quot; — status barang otomatis berubah kalau
+              stok sekarang turun sampai atau di bawah angka ini.
+            </p>
+          </div>
         </div>
+        <HargaBeliField
+          isEditing={Boolean(editingId)}
+          stock={form.stock ?? 0}
+          price={form.price ?? 0}
+          onPriceChange={(value) => setForm({ ...form, price: value })}
+        />
+        {!editingId ? (
+          <div>
+            <Select
+              label="Gudang Tujuan Stok Awal"
+              value={form.warehouseId ?? ''}
+              onChange={(event) => setForm({ ...form, warehouseId: event.target.value })}
+              placeholder="Pilih gudang"
+              options={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
+            />
+            <p className="mt-1 text-xs text-textMuted">
+              {(form.stock ?? 0) > 0
+                ? 'Wajib dipilih karena Stok Awal di atas diisi — stok ini akan langsung tercatat di gudang yang dipilih.'
+                : 'Cuma perlu dipilih kalau Stok Awal di atas diisi. Kalau stok akan ditambah lewat Barang Masuk seperti biasa, boleh dikosongkan.'}
+            </p>
+          </div>
+        ) : null}
+        <StokKoreksiGudangField
+          visible={Boolean(editingId) && (form.stock ?? 0) !== originalStock}
+          originalStock={originalStock}
+          currentStock={form.stock ?? 0}
+          warehouseId={form.warehouseId ?? ''}
+          onWarehouseIdChange={(value) => setForm({ ...form, warehouseId: value })}
+          gudangOptions={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
+        />
         <SelectWithCreate
           label="Satuan"
           value={form.unitId ?? ''}
@@ -796,11 +1068,6 @@ export function ItemsManagementContent(): React.JSX.Element {
             await mutateSatuan();
             return { label: `${created.nama} (${created.singkatan})`, value: String(created.id) };
           }}
-        />
-        <CurrencyField
-          label="Harga Beli"
-          value={form.price ?? 0}
-          onValueChange={(value) => setForm({ ...form, price: value })}
         />
         <div>
           <Input
@@ -877,35 +1144,527 @@ export function ItemsManagementContent(): React.JSX.Element {
           onChange={(event) => setForm({ ...form, deskripsi: event.target.value })}
         />
       </Modal>
-      <Modal
-        isOpen={delegatingRow !== null}
-        title={`Delegasikan Pengajuan — ${delegatingRow?.name ?? ''}`}
+      <DelegateModal
+        row={delegatingRow}
+        delegateUserId={delegateUserId}
+        onDelegateUserIdChange={setDelegateUserId}
+        adminOptions={adminOptions}
+        isDelegating={isDelegating}
         onClose={() => setDelegatingRow(null)}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setDelegatingRow(null)}>
-              Batal
-            </Button>
-            <Button onClick={handleDelegate} loading={isDelegating}>
-              Delegasikan
-            </Button>
-          </>
-        }
-      >
-        <p className="text-xs text-textMuted">
-          Tugaskan admin tertentu untuk mengecek fisik (kondisi barang, kecocokan serial number & kode
-          barang) dan memproses (Setujui/Tolak) pengajuan ini — kamu (super admin) tetap bisa
-          memprosesnya sendiri kapan saja.
-        </p>
-        <Select
-          label="Delegasikan ke Admin"
-          value={delegateUserId}
-          onChange={(e) => setDelegateUserId(e.target.value)}
-          placeholder="Pilih admin"
-          options={adminOptions}
-        />
-      </Modal>
+        onDelegate={handleDelegate}
+        onBatalkanDelegasi={handleBatalkanDelegasi}
+      />
+      <DetailStokModal
+        row={detailStokRow}
+        data={detailStok}
+        isLoading={isLoadingDetailStok}
+        serials={detailStokSerials?.data}
+        isLoadingSerials={isLoadingDetailStokSerials}
+        canEditSpesifikasi={canEditSpesifikasi}
+        onClose={() => setDetailStokRow(null)}
+      />
       {exportDialog}
     </PageShell>
+  );
+}
+
+interface StokKoreksiGudangFieldProps {
+  visible: boolean;
+  originalStock: number;
+  currentStock: number;
+  warehouseId: string;
+  onWarehouseIdChange: (value: string) => void;
+  gudangOptions: { label: string; value: string }[];
+}
+
+// StokKoreksiGudangField: cuma muncul saat "Ubah Barang" dan nilai Stok
+// diubah dari nilai aslinya — memaksa pengguna memilih gudang tujuan
+// koreksi supaya backend bisa menerapkan selisihnya ke barang_stok_gudang
+// lalu menghitung ulang total stok secara real-time (bukan menimpa Stok
+// langsung tanpa jejak gudang, yang menyebabkan bug drift sebelumnya).
+function StokKoreksiGudangField({
+  visible,
+  originalStock,
+  currentStock,
+  warehouseId,
+  onWarehouseIdChange,
+  gudangOptions,
+}: StokKoreksiGudangFieldProps): React.JSX.Element | null {
+  if (!visible) return null;
+  return (
+    <div>
+      <Select
+        label="Gudang Tujuan Koreksi Stok"
+        value={warehouseId}
+        onChange={(event) => onWarehouseIdChange(event.target.value)}
+        placeholder="Pilih gudang"
+        options={gudangOptions}
+      />
+      <p className="mt-1 text-xs text-textMuted">
+        Wajib dipilih karena Stok di atas diubah dari {formatNumber(originalStock)} menjadi{' '}
+        {formatNumber(currentStock)} — selisihnya akan diterapkan ke stok gudang ini, lalu total stok barang
+        dihitung ulang otomatis (real-time) dari rincian per gudang.
+      </p>
+    </div>
+  );
+}
+
+interface DelegateModalProps {
+  row: Item | null;
+  delegateUserId: string;
+  onDelegateUserIdChange: (value: string) => void;
+  adminOptions: { label: string; value: string }[];
+  isDelegating: boolean;
+  onClose: () => void;
+  onDelegate: () => void | Promise<void>;
+  onBatalkanDelegasi: () => void | Promise<void>;
+}
+
+function DelegateModal({
+  row,
+  delegateUserId,
+  onDelegateUserIdChange,
+  adminOptions,
+  isDelegating,
+  onClose,
+  onDelegate,
+  onBatalkanDelegasi,
+}: DelegateModalProps): React.JSX.Element {
+  return (
+    <Modal
+      isOpen={row !== null}
+      title={`Delegasikan Pengajuan — ${row?.name ?? ''}`}
+      onClose={onClose}
+      footer={
+        <>
+          {row?.delegatedToUserId ? (
+            <Button variant="secondary" onClick={onBatalkanDelegasi} loading={isDelegating}>
+              Batal Delegasi
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={onClose}>
+            Tutup
+          </Button>
+          <Button onClick={onDelegate} loading={isDelegating}>
+            Delegasikan
+          </Button>
+        </>
+      }
+    >
+      <p className="text-xs text-textMuted">
+        Tugaskan admin tertentu untuk mengecek fisik (kondisi barang, kecocokan serial number & kode barang) dan
+        memproses (Setujui/Tolak) pengajuan ini — kamu (super admin) tetap bisa memprosesnya sendiri kapan saja.
+      </p>
+      <Select
+        label="Delegasikan ke Admin"
+        value={delegateUserId}
+        onChange={(e) => onDelegateUserIdChange(e.target.value)}
+        placeholder="Pilih admin"
+        options={adminOptions}
+      />
+    </Modal>
+  );
+}
+
+interface DetailStokModalProps {
+  row: Item | null;
+  data: RawBarangDetailStok | null | undefined;
+  isLoading: boolean;
+  serials: BarangSerialUnit[] | undefined;
+  isLoadingSerials: boolean;
+  canEditSpesifikasi: boolean;
+  onClose: () => void;
+}
+
+function DetailStokModal({ row, data, isLoading, serials, isLoadingSerials, canEditSpesifikasi, onClose }: DetailStokModalProps): React.JSX.Element {
+  return (
+    <Modal
+      isOpen={row !== null}
+      title={`Detail Stok Real-time — ${row?.name ?? ''}`}
+      onClose={onClose}
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Tutup
+        </Button>
+      }
+    >
+      {isLoading || !data ? (
+        <p className="text-xs text-textMuted">Memuat data stok real-time...</p>
+      ) : (
+        <DetailStokModalBody
+          data={data}
+          isSerialized={row?.isSerialized ?? false}
+          satuan={row?.unit}
+          serials={serials}
+          isLoadingSerials={isLoadingSerials}
+          canEditSpesifikasi={canEditSpesifikasi}
+        />
+      )}
+    </Modal>
+  );
+}
+
+function DetailStokSerialTableBody({ serials }: { serials: BarangSerialUnit[] }): React.JSX.Element {
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="border-b border-borderSubtle text-left text-textMuted">
+          <th className="py-1 font-medium">Nomor Seri</th>
+          <th className="py-1 font-medium">Gudang</th>
+          <th className="py-1 text-right font-medium">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {serials.map((unit) => (
+          <tr key={unit.id} className="border-b border-borderSubtle last:border-0">
+            <td className="py-1 font-mono text-textPrimary">{unit.serialNumber}</td>
+            <td className="py-1 text-textPrimary">{unit.warehouseName ?? '-'}</td>
+            <td className="py-1 text-right text-textPrimary">{unit.status}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DetailStokSerialTable({ isSerialized, serials, isLoadingSerials }: { isSerialized: boolean; serials: BarangSerialUnit[] | undefined; isLoadingSerials: boolean }): React.JSX.Element | null {
+  if (!isSerialized) return null;
+  let body: React.JSX.Element;
+  if (isLoadingSerials || !serials) {
+    body = <p className="text-xs text-textMuted">Memuat nomor seri...</p>;
+  } else if (serials.length === 0) {
+    body = <p className="text-xs text-textMuted">Belum ada nomor seri terdaftar untuk barang ini.</p>;
+  } else {
+    body = <DetailStokSerialTableBody serials={serials} />;
+  }
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-medium text-textMuted">Nomor Seri</p>
+      {body}
+    </div>
+  );
+}
+
+// StokKlasifikasiTiles: pembeda real-time "Barang Baku" (masih tersegel di
+// gudang, belum dibuka) vs "Barang Jadi" (sudah dibuka/dikeluarkan lewat
+// dokumen Barang Keluar & sedang/​sudah dalam progres pemasangan) — dihitung
+// langsung dari totalStok/totalKeluar yang sudah dimuat di RawBarangDetailStok,
+// jadi berlaku untuk barang apa pun (bukan cuma kabel), bukan cuma barang
+// isSerialized.
+function StokKlasifikasiTiles({
+  totalStok,
+  totalKeluar,
+  satuan,
+}: {
+  totalStok: number;
+  totalKeluar: number;
+  satuan?: string;
+}): React.JSX.Element {
+  const unit = satuan ?? '';
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-medium text-textMuted">Klasifikasi Real-time</p>
+      <StatsRow
+        stats={[
+          {
+            id: 'barang-baku',
+            label: 'Barang Baku (Tersegel)',
+            value: `${formatNumber(totalStok)} ${unit}`.trim(),
+            helperText: 'Masih di gudang, segel/kemasan belum dibuka',
+          },
+          {
+            id: 'barang-jadi',
+            label: 'Barang Jadi (Sudah Dibuka)',
+            value: `${formatNumber(totalKeluar)} ${unit}`.trim(),
+            helperText: 'Sudah keluar & dalam progres pemasangan',
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
+function DetailStokModalBody({
+  data,
+  isSerialized,
+  satuan,
+  serials,
+  isLoadingSerials,
+  canEditSpesifikasi,
+}: {
+  data: RawBarangDetailStok;
+  isSerialized: boolean;
+  satuan?: string;
+  serials: BarangSerialUnit[] | undefined;
+  isLoadingSerials: boolean;
+  canEditSpesifikasi: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-textMuted">
+        Kode barang <span className="font-semibold text-textPrimary">{data.kodeBarang}</span> — dihitung langsung
+        dari dokumen Barang Masuk & Barang Keluar yang sudah selesai, jadi selalu real-time (bukan angka cache).
+      </p>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-lg border border-borderSubtle bg-neutralBg p-3 text-center">
+          <p className="text-[11px] text-textMuted">Total Stok</p>
+          <p className="text-lg font-semibold text-textPrimary">{data.totalStok}</p>
+        </div>
+        <div className="rounded-lg border border-borderSubtle bg-successBg p-3 text-center">
+          <p className="text-[11px] text-textMuted">Total Masuk</p>
+          <p className="text-lg font-semibold text-successText">{data.totalMasuk}</p>
+        </div>
+        <div className="rounded-lg border border-borderSubtle bg-dangerBg p-3 text-center">
+          <p className="text-[11px] text-textMuted">Total Keluar</p>
+          <p className="text-lg font-semibold text-dangerText">{data.totalKeluar}</p>
+        </div>
+      </div>
+      <StokKlasifikasiTiles totalStok={data.totalStok} totalKeluar={data.totalKeluar} satuan={satuan} />
+      <div>
+        <p className="mb-1 text-[11px] font-medium text-textMuted">Stok per Gudang</p>
+        {data.perGudang.length === 0 ? (
+          <p className="text-xs text-textMuted">Belum ada stok di gudang manapun.</p>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-borderSubtle text-left text-textMuted">
+                <th className="py-1 font-medium">Gudang</th>
+                <th className="py-1 text-right font-medium">Stok</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.perGudang.map((row) => (
+                <tr key={row.gudangId} className="border-b border-borderSubtle last:border-0">
+                  <td className="py-1 text-textPrimary">{row.namaGudang}</td>
+                  <td className="py-1 text-right text-textPrimary">{row.stok}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      <DetailStokSerialTable isSerialized={isSerialized} serials={serials} isLoadingSerials={isLoadingSerials} />
+      <SpesifikasiSection barangId={String(data.barangId)} canEdit={canEditSpesifikasi} />
+    </div>
+  );
+}
+
+// progressBadge/EditSpesifikasiModal/SpesifikasiSection: dulu tab
+// "Spesifikasi" terpisah di menu Kelola Barang (daftar gabungan semua
+// barang) — sekarang dipindah jadi bagian dari modal Detail Stok per
+// barang (progres terpakai/terpasang/sisa khusus barang ini saja),
+// supaya semua rincian 1 barang — masuk/keluar, stok per gudang, nomor
+// seri, dan spesifikasi — terkumpul di satu tempat.
+function progressBadge(row: RawSpesifikasiListRow): { label: string; variant: StatusBadgeVariant } {
+  if (row.jumlahTerpasang <= 0) return { label: 'Belum Terpasang', variant: 'warning' };
+  if (row.jumlahTerpasang >= row.qty) return { label: 'Selesai Terpasang', variant: 'success' };
+  return { label: 'Sebagian Terpasang', variant: 'info' };
+}
+
+interface EditSpesifikasiModalProps {
+  row: RawSpesifikasiListRow | null;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function EditSpesifikasiModal({ row, onClose, onSaved }: EditSpesifikasiModalProps): React.JSX.Element {
+  const [jumlahTerpasang, setJumlahTerpasang] = useState(row?.jumlahTerpasang ?? 0);
+  const [catatan, setCatatan] = useState(row?.catatanSpesifikasi ?? '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sinkron ulang form setiap kali baris target berganti (modal dibuka lagi
+  // untuk baris lain) — dilakukan lewat key di parent, lihat pemanggilan.
+  const sisa = row ? Math.max(row.qty - jumlahTerpasang, 0) : 0;
+
+  async function handleSave(): Promise<void> {
+    if (!row) return;
+    setIsSaving(true);
+    try {
+      await goodsOutApi.updateSpesifikasi(String(row.barangKeluarId), String(row.itemId), {
+        jumlahTerpasang,
+        catatan,
+      });
+      toast.success('Spesifikasi berhasil diperbarui.');
+      onSaved();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal memperbarui spesifikasi.'));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      isOpen={row !== null}
+      title={`Ubah Spesifikasi — ${row?.namaBarang ?? ''}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Batal
+          </Button>
+          <Button onClick={handleSave} loading={isSaving}>
+            Simpan
+          </Button>
+        </>
+      }
+    >
+      {row ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-textMuted">
+            Dari dokumen <span className="font-medium text-text">{row.nomorPengeluaran}</span> ({formatDate(row.tanggal)})
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-textMuted">Terpakai</span>
+              <span className="text-sm font-semibold text-text">{row.qty}</span>
+            </div>
+            <NumberField
+              label="Terpasang"
+              value={jumlahTerpasang}
+              onValueChange={(value) => setJumlahTerpasang(Math.min(Math.max(value, 0), row.qty))}
+            />
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-textMuted">Sisa</span>
+              <span className="text-sm font-semibold text-text">{sisa}</span>
+            </div>
+          </div>
+          <Input
+            label="Catatan (opsional)"
+            value={catatan}
+            onChange={(e) => setCatatan(e.target.value)}
+            placeholder="mis. terpasang di Blok A"
+          />
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function SpesifikasiSectionTable({
+  rows,
+  canEdit,
+  onEditRow,
+}: {
+  rows: RawSpesifikasiListRow[];
+  canEdit: boolean;
+  onEditRow: (row: RawSpesifikasiListRow) => void;
+}): React.JSX.Element {
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="border-b border-borderSubtle text-left text-textMuted">
+          <th className="py-1 font-medium">Tanggal</th>
+          <th className="py-1 font-medium">Nomor Pengeluaran</th>
+          <th className="py-1 font-medium">Gudang</th>
+          <th className="py-1 text-right font-medium">Terpakai</th>
+          <th className="py-1 text-right font-medium">Terpasang</th>
+          <th className="py-1 text-right font-medium">Sisa</th>
+          <th className="py-1 font-medium">Status</th>
+          {canEdit ? <th className="py-1" /> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const meta = progressBadge(row);
+          return (
+            <tr key={row.itemId} className="border-b border-borderSubtle last:border-0">
+              <td className="py-1 text-textPrimary">{formatDate(row.tanggal)}</td>
+              <td className="py-1 text-textPrimary">{row.nomorPengeluaran}</td>
+              <td className="py-1 text-textPrimary">{row.namaGudang ?? '-'}</td>
+              <td className="py-1 text-right text-textPrimary">{`${row.qty} ${row.satuan ?? ''}`.trim()}</td>
+              <td className="py-1 text-right text-textPrimary">{`${row.jumlahTerpasang} ${row.satuan ?? ''}`.trim()}</td>
+              <td className="py-1 text-right text-textPrimary">{`${row.jumlahSisa} ${row.satuan ?? ''}`.trim()}</td>
+              <td className="py-1">
+                <Badge label={meta.label} variant={meta.variant} />
+              </td>
+              {canEdit ? (
+                <td className="py-1 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onEditRow(row)}
+                    title="Ubah spesifikasi"
+                    className="rounded p-1 text-textMuted hover:bg-neutralBg hover:text-accentDark"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+              ) : null}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function SpesifikasiSection({ barangId, canEdit }: { barangId: string; canEdit: boolean }): React.JSX.Element {
+  const { data, isLoading, mutate } = useSWR(['barang-detail-spesifikasi', barangId], () =>
+    spesifikasiApi.list({ barangId, pageSize: 100 }),
+  );
+  const [editingRow, setEditingRow] = useState<RawSpesifikasiListRow | null>(null);
+  const rows = data?.data ?? [];
+  const belum = rows.filter((r) => r.jumlahTerpasang <= 0).length;
+  const selesai = rows.filter((r) => r.jumlahTerpasang >= r.qty).length;
+  const sebagian = rows.length - belum - selesai;
+  // Ringkasan total Barang Jadi (kuantitas, bukan jumlah dokumen) — agregat
+  // dari seluruh baris spesifikasi barang ini, dipakai sebagai rincian
+  // lanjutan dari tile "Barang Jadi (Sudah Dibuka)" di atas modal.
+  const totalQty = rows.reduce((sum, r) => sum + r.qty, 0);
+  const totalTerpasang = rows.reduce((sum, r) => sum + r.jumlahTerpasang, 0);
+  const totalSisa = rows.reduce((sum, r) => sum + r.jumlahSisa, 0);
+  const satuanRingkasan = rows[0]?.satuan ?? '';
+
+  let body: React.JSX.Element;
+  if (isLoading) {
+    body = <p className="text-xs text-textMuted">Memuat data spesifikasi...</p>;
+  } else if (rows.length === 0) {
+    body = <p className="text-xs text-textMuted">Belum ada progres spesifikasi (terpasang) untuk barang ini.</p>;
+  } else {
+    body = (
+      <>
+        <StatsRow
+          stats={[
+            { id: 'belum', label: 'Belum Terpasang', value: belum },
+            { id: 'sebagian', label: 'Sebagian Terpasang', value: sebagian },
+            { id: 'selesai', label: 'Selesai Terpasang', value: selesai },
+          ]}
+        />
+        <p className="my-2 text-xs text-textMuted">
+          Rincian Barang Jadi — Terpasang:{' '}
+          <span className="font-semibold text-textPrimary">
+            {formatNumber(totalTerpasang)} {satuanRingkasan}
+          </span>{' '}
+          · Sisa:{' '}
+          <span className="font-semibold text-textPrimary">
+            {formatNumber(totalSisa)} {satuanRingkasan}
+          </span>{' '}
+          · Total:{' '}
+          <span className="font-semibold text-textPrimary">
+            {formatNumber(totalQty)} {satuanRingkasan}
+          </span>
+        </p>
+        <SpesifikasiSectionTable rows={rows} canEdit={canEdit} onEditRow={setEditingRow} />
+      </>
+    );
+  }
+
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-medium text-textMuted">
+        Spesifikasi (Terpasang/Terpakai/Sisa) — khusus barang yang dipasang bertahap seperti kabel, tapi berlaku
+        untuk barang apa pun yang punya progres pemasangan dari dokumen Barang Keluar.
+      </p>
+      {body}
+      <EditSpesifikasiModal
+        key={editingRow?.itemId ?? 'none'}
+        row={editingRow}
+        onClose={() => setEditingRow(null)}
+        onSaved={() => {
+          setEditingRow(null);
+          void mutate();
+        }}
+      />
+    </div>
   );
 }

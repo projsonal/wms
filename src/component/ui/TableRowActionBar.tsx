@@ -192,7 +192,7 @@ function MobileFabActionMenu({ onAction, disabledActions, actions }: Readonly<Mo
         ) : null}
       </AnimatePresence>
 
-      <div className="fixed bottom-32 right-16 z-50 sm:right-20">
+      <div className="fixed bottom-32 right-3 z-50 sm:right-20">
 
         <AnimatePresence>
           {open ? (

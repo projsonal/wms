@@ -3,29 +3,38 @@
 import { useRef, useState } from 'react';
 import useSWR from 'swr';
 import { toast } from 'sonner';
-import { Trash2, Pencil, CheckCircle2, XCircle, Camera } from 'lucide-react';
+import { Trash2, Pencil, CheckCircle2, XCircle, Camera, PackageCheck } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { Badge } from '@/component/ui/Badge';
 import { Button } from '@/component/ui/Button';
 import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { Modal } from '@/component/ui/Modal';
-import { Input } from '@/component/ui/FormControls';
+import { Input, Select } from '@/component/ui/FormControls';
+import { ScanSnButton } from '@/component/ui/ScanSnButton';
 import { StatsRow } from '@/component/ui/StatsRow';
 import { TableSearchInput } from '@/component/ui/TableSearchInput';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
-import { barangRusakApi, type BarangRusakPayload } from '@/lib/api/modules';
+import { barangRusakApi, itemsApi, warehousesApi, type BarangRusakPayload } from '@/lib/api/modules';
 import { useServerPaginatedList } from '@/lib/hooks/useServerPaginatedList';
 import { useDebouncedSearch } from '@/lib/hooks/useDebouncedSearch';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { BARANG_RUSAK_STATUS_META } from '@/lib/utils/status';
 import { useAuthedImage } from '@/lib/hooks/useAuthedImage';
 import type { BarangRusak } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 
-const EMPTY_FORM: Partial<BarangRusakPayload> = { labelBarang: '', namaBarang: '', serialNumber: '', keterangan: '' };
+const EMPTY_FORM: Partial<BarangRusakPayload> = {
+  labelBarang: '',
+  namaBarang: '',
+  merek: '',
+  kodeBarang: '',
+  serialNumber: '',
+  keterangan: '',
+};
 
 const CONFIRM_DELETE_MESSAGE = 'Apakah yakin ingin menghapus laporan barang rusak ini?';
 
@@ -51,16 +60,26 @@ function BarangRusakBody(): React.JSX.Element {
   const { requestExport, dialog: exportDialog } = useExportFormat();
 
   const { input: searchInput, setInput: setSearchInput, term: searchTerm } = useDebouncedSearch();
+  const [filterBarangId, setFilterBarangId] = useState('');
   const { rows, isLoading, error, mutate, serverPagination } = useServerPaginatedList(
     'barang-rusak',
     barangRusakApi,
-    { search: searchTerm || undefined },
+    { search: searchTerm || undefined, barang_id: filterBarangId || undefined },
   );
   const { data: summary, mutate: mutateSummary } = useSWR('barang-rusak-summary', () => barangRusakApi.summary());
+  const { data: barangList } = useSWR('items-for-barang-rusak', () => itemsApi.list({ pageSize: 200 }));
+  const { data: gudangListForSimpan } = useSWR('warehouses-for-barang-rusak', () => warehousesApi.list({ pageSize: 100 }));
+
+  const [simpanGudangTarget, setSimpanGudangTarget] = useState<BarangRusak | null>(null);
+  const [simpanGudangId, setSimpanGudangId] = useState('');
+  const [isSimpanGudangSaving, setIsSimpanGudangSaving] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<BarangRusakPayload>>(EMPTY_FORM);
+  // barangId dipisah dari `form` karena Select butuh value string, sedangkan
+  // BarangRusakPayload.barangId bertipe number|null (dikonversi saat submit).
+  const [barangId, setBarangId] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [fotoTargetId, setFotoTargetId] = useState<string | null>(null);
   const [uploadingFotoId, setUploadingFotoId] = useState<string | null>(null);
@@ -81,6 +100,7 @@ function BarangRusakBody(): React.JSX.Element {
   function openCreateModal(): void {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setBarangId('');
     setIsModalOpen(true);
   }
 
@@ -93,10 +113,31 @@ function BarangRusakBody(): React.JSX.Element {
     setForm({
       labelBarang: row.labelBarang,
       namaBarang: row.namaBarang,
+      merek: row.merek ?? '',
+      kodeBarang: row.kodeBarang ?? '',
       serialNumber: row.serialNumber ?? '',
       keterangan: row.keterangan ?? '',
     });
+    setBarangId(row.barangId ?? '');
     setIsModalOpen(true);
+  }
+
+  function handleBarangPicked(value: string): void {
+    setBarangId(value);
+    const selected = barangList?.data.find((b) => b.id === value);
+    if (selected) {
+      // Auto-isi Label/Kode, Nama, Merek & Kode Barang (SKU) dari katalog
+      // Kelola Barang supaya konsisten dengan data asli — tetap boleh
+      // diedit manual (mis. kalau barang yang rusak belum terdaftar di
+      // katalog, atau mereknya beda dari catatan katalog).
+      setForm((prev) => ({
+        ...prev,
+        labelBarang: selected.sku,
+        namaBarang: selected.name,
+        merek: selected.merek ?? '',
+        kodeBarang: selected.sku,
+      }));
+    }
   }
 
   function triggerFotoUpload(row: BarangRusak): void {
@@ -117,7 +158,7 @@ function BarangRusakBody(): React.JSX.Element {
     try {
       await barangRusakApi.uploadFoto(targetId, file);
       toast.success('Foto bukti berhasil diunggah.');
-      await mutate();
+      mutate();
       mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal mengunggah foto bukti.'));
@@ -135,8 +176,11 @@ function BarangRusakBody(): React.JSX.Element {
     setIsSaving(true);
     try {
       const payload: BarangRusakPayload = {
+        barangId: barangId ? Number(barangId) : null,
         labelBarang: form.labelBarang,
         namaBarang: form.namaBarang,
+        merek: form.merek ?? '',
+        kodeBarang: form.kodeBarang ?? '',
         serialNumber: form.serialNumber ?? '',
         keterangan: form.keterangan ?? '',
       };
@@ -148,7 +192,7 @@ function BarangRusakBody(): React.JSX.Element {
         toast.success('Laporan berhasil dibuat, menunggu pengecekan fisik terhadap barang.');
       }
       setIsModalOpen(false);
-      await mutate();
+      mutate();
       mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal menyimpan laporan barang rusak.'));
@@ -168,7 +212,7 @@ function BarangRusakBody(): React.JSX.Element {
     try {
       await barangRusakApi.remove(row.id);
       toast.success('Laporan berhasil dihapus.');
-      await mutate();
+      mutate();
       mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal menghapus laporan.'));
@@ -189,14 +233,40 @@ function BarangRusakBody(): React.JSX.Element {
     try {
       await barangRusakApi.inspeksi(row.id, jenis);
       toast.success('Hasil pengecekan berhasil disimpan.');
-      await mutate();
+      mutate();
       mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Gagal menyimpan hasil pengecekan.'));
     }
   }
 
+  function openSimpanGudangModal(row: BarangRusak): void {
+    setSimpanGudangTarget(row);
+    setSimpanGudangId('');
+  }
+
+  async function handleSimpanKeGudang(): Promise<void> {
+    if (!simpanGudangTarget) return;
+    if (!simpanGudangId) {
+      toast.error('Pilih gudang tujuan terlebih dahulu.');
+      return;
+    }
+    setIsSimpanGudangSaving(true);
+    try {
+      await barangRusakApi.simpanKeGudang(simpanGudangTarget.id, simpanGudangId);
+      toast.success('Barang berhasil disimpan kembali ke stok gudang.');
+      setSimpanGudangTarget(null);
+      mutate();
+      mutateSummary();
+    } catch (err) {
+      toast.error(friendlyError(err, 'Gagal menyimpan barang ke gudang.'));
+    } finally {
+      setIsSimpanGudangSaving(false);
+    }
+  }
+
   const EXPORT_COLUMNS = [
+    { header: 'Tanggal Lapor', accessor: (r: BarangRusak) => formatTanggalPanjang(r.createdAt) },
     { header: 'Label/Kode Barang', accessor: (r: BarangRusak) => r.labelBarang },
     { header: 'Kode Barang (SKU)', accessor: (r: BarangRusak) => r.kodeBarang ?? '-' },
     { header: 'Nama Barang', accessor: (r: BarangRusak) => r.namaBarang },
@@ -213,9 +283,14 @@ function BarangRusakBody(): React.JSX.Element {
     subtitle: 'Menu Utama / Barang Rusak',
     description: 'Kumpulan Data Barang rusak/retur beserta status hasil pengecekan fisik.',
   };
+  const GRANULARITY: GranularityConfig<BarangRusak> = {
+    dateAccessor: (r) => r.createdAt,
+    sumHeaders: [],
+    groupKeyHeader: 'Status',
+  };
 
   function handleExport(): void {
-    requestExport(rows, EXPORT_COLUMNS, 'daftar-barang-rusak', PDF_META);
+    requestExport(rows, EXPORT_COLUMNS, 'daftar-barang-rusak', PDF_META, GRANULARITY);
   }
 
   function handlePrint(): void {
@@ -250,7 +325,7 @@ function BarangRusakBody(): React.JSX.Element {
       await Promise.all(selectedRows.map((r) => barangRusakApi.remove(r.id)));
       toast.success(`${selectedRows.length} laporan berhasil dihapus.`);
       setSelectedIds(new Set());
-      await mutate();
+      mutate();
       mutateSummary();
     } catch (err) {
       toast.error(friendlyError(err, 'Sebagian/semua laporan gagal dihapus.'));
@@ -340,6 +415,26 @@ function BarangRusakBody(): React.JSX.Element {
           >
             <Camera className="h-3.5 w-3.5" />
           </button>
+          {isStaff && row.status === 'retur' ? (
+            <button
+              type="button"
+              onClick={() => openSimpanGudangModal(row)}
+              title="Simpan Kembali ke Stok Gudang (pengganti fitur retur ke supplier)"
+              className="flex items-center gap-1 rounded px-1.5 py-1 text-textMuted hover:bg-successBg hover:text-successText"
+            >
+              <PackageCheck className="h-3.5 w-3.5" />
+              <span className="text-xs">Simpan ke Gudang</span>
+            </button>
+          ) : null}
+          {isStaff && row.status === 'rusak' ? (
+            <span
+              title="Barang ini dinyatakan rusak total saat pengecekan fisik, jadi tidak bisa dikembalikan sebagai stok — laporan ini sudah final, tidak ada tindak lanjut lagi di sistem (mis. pembuangan fisik dilakukan manual di luar sistem)."
+              className="flex items-center gap-1 rounded px-1.5 py-1 text-xs text-textMuted"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Rusak total
+            </span>
+          ) : null}
           {isStaff && row.status === 'pengecekan' ? (
             <>
               <button
@@ -412,7 +507,25 @@ function BarangRusakBody(): React.JSX.Element {
         visibleActions={['add', 'change', 'delete', 'export', 'print', 'modify']}
         module="barang_rusak"
         serverPagination={serverPagination}
-        toolbar={<TableSearchInput value={searchInput} onChange={setSearchInput} placeholder="Cari label/nama barang......" />}
+        toolbar={
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={filterBarangId}
+              onChange={(e) => setFilterBarangId(e.target.value)}
+              placeholder="Filter SKU"
+              options={(barangList?.data ?? []).map((b) => ({ label: b.sku, value: b.id }))}
+              className="w-44"
+            />
+            <Select
+              value={filterBarangId}
+              onChange={(e) => setFilterBarangId(e.target.value)}
+              placeholder="Filter Nama Barang"
+              options={(barangList?.data ?? []).map((b) => ({ label: b.name, value: b.id }))}
+              className="w-52"
+            />
+            <TableSearchInput value={searchInput} onChange={setSearchInput} placeholder="Cari label/nama barang......" />
+          </div>
+        }
       />
 
       <Modal
@@ -431,6 +544,21 @@ function BarangRusakBody(): React.JSX.Element {
           </>
         }
       >
+        <Select
+          label="Pilih dari Kelola Barang (opsional)"
+          value={barangId}
+          onChange={(event) => handleBarangPicked(event.target.value)}
+          placeholder="Barang belum terdaftar / isi manual di bawah"
+          options={(barangList?.data ?? []).map((b) => {
+            const details = [b.merek, b.tipe].filter(Boolean).join(' ');
+            const detailsSuffix = details ? ` (${details})` : '';
+            return { label: `${b.sku} — ${b.name}${detailsSuffix}`, value: b.id };
+          })}
+        />
+        <p className="-mt-2 text-xs text-textMuted">
+          Kalau dipilih, Label/Kode & Nama Barang di bawah otomatis terisi dari SKU aslinya (tetap
+          bisa diedit), dan Merek/Tipe akan ikut tercatat di laporan ini.
+        </p>
         <Input
           label="Label / Kode Barang"
           value={form.labelBarang ?? ''}
@@ -442,12 +570,31 @@ function BarangRusakBody(): React.JSX.Element {
           value={form.namaBarang ?? ''}
           onChange={(event) => setForm({ ...form, namaBarang: event.target.value })}
         />
-        <Input
-          label="Serial Number (opsional)"
-          value={form.serialNumber ?? ''}
-          onChange={(event) => setForm({ ...form, serialNumber: event.target.value })}
-          placeholder="apabila barang memiliki Serial Number (SN)"
-        />
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="Merek (opsional)"
+            value={form.merek ?? ''}
+            onChange={(event) => setForm({ ...form, merek: event.target.value })}
+            placeholder="mis. Huawei"
+          />
+          <Input
+            label="Kode Barang / SKU (opsional)"
+            value={form.kodeBarang ?? ''}
+            onChange={(event) => setForm({ ...form, kodeBarang: event.target.value })}
+            placeholder="mis. WRSD-0001"
+          />
+        </div>
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <Input
+              label="Serial Number (opsional)"
+              value={form.serialNumber ?? ''}
+              onChange={(event) => setForm({ ...form, serialNumber: event.target.value })}
+              placeholder="apabila barang memiliki Serial Number (SN)"
+            />
+          </div>
+          <ScanSnButton onScan={(value) => setForm((prev) => ({ ...prev, serialNumber: value }))} />
+        </div>
         <Input
           label="Keterangan (opsional)"
           value={form.keterangan ?? ''}
@@ -455,6 +602,51 @@ function BarangRusakBody(): React.JSX.Element {
           placeholder="Kondisi kerusakan yang terlihat"
         />
       </Modal>
+
+      <Modal
+        isOpen={simpanGudangTarget !== null}
+        title="Simpan Kembali ke Stok Gudang"
+        onClose={() => setSimpanGudangTarget(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setSimpanGudangTarget(null)}>
+              Batal
+            </Button>
+            <Button
+              onClick={handleSimpanKeGudang}
+              loading={isSimpanGudangSaving}
+              disabled={!simpanGudangTarget?.barangId}
+            >
+              Simpan ke Gudang
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-textMuted">
+          Fitur retur langsung ke supplier sudah tidak tersedia di aplikasi ini. Sebagai gantinya,
+          barang &quot;{simpanGudangTarget?.namaBarang}&quot; ({simpanGudangTarget?.labelBarang}) yang
+          berstatus Bisa Diretur (masih layak pakai, bukan rusak total) akan ditambahkan kembali
+          sebagai stok (+1 unit) ke gudang yang kamu pilih di bawah, supaya tidak menggantung tanpa
+          tindak lanjut. Proses retur fisik ke supplier tetap dilakukan manual di luar sistem. Untuk
+          barang yang dinyatakan Rusak Total (bukan Bisa Diretur), fitur ini tidak berlaku karena
+          barangnya memang tidak bisa dikembalikan sebagai stok.
+        </p>
+        {!simpanGudangTarget?.barangId ? (
+          <p className="rounded-md bg-warningBg px-3 py-2 text-xs text-warningText">
+            Laporan ini belum tertaut ke katalog Kelola Barang, jadi stoknya tidak bisa ditambahkan
+            otomatis. Tautkan dulu barangnya lewat tombol Ubah sebelum menyimpan ke gudang.
+          </p>
+        ) : (
+          <Select
+            label="Gudang Tujuan"
+            value={simpanGudangId}
+            onChange={(event) => setSimpanGudangId(event.target.value)}
+            placeholder="Pilih gudang"
+            options={(gudangListForSimpan?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
+          />
+        )}
+      </Modal>
+
       <input
         ref={fotoInputRef}
         type="file"

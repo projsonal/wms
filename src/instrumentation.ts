@@ -3,19 +3,9 @@ export async function register(): Promise<void> {
     return;
   }
 
-  const { logger } = await import('@/lib/logger');
-
-  process.on('uncaughtException', (error) => {
-    logger.error(error.message || 'Uncaught exception di server', {
-      name: error.name,
-      stack: error.stack,
-    });
-  });
-
-  process.on('unhandledRejection', (reason) => {
-    const message = reason instanceof Error ? reason.message : String(reason);
-    logger.error(message || 'Unhandled promise rejection di server', {
-      stack: reason instanceof Error ? reason.stack : undefined,
-    });
-  });
+  // Diimpor dinamis dari file terpisah (instrumentation.node.ts) supaya
+  // bundler Edge Runtime tidak pernah menyertakan/menganalisis process.on
+  // sama sekali — lihat komentar di instrumentation.node.ts.
+  const { registerNodeHandlers } = await import('@/instrumentation.node');
+  await registerNodeHandlers();
 }

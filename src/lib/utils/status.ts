@@ -16,6 +16,17 @@ export const ITEM_STATUS_META: Record<'tersedia' | 'menipis' | 'habis', StatusMe
   habis: { label: 'Habis', variant: 'danger' },
 };
 
+// template: label default kalau baris pengajuannya entah kenapa tidak
+// membawa relasi `template` (mis. race saat baru dibuat) — normalnya
+// komponen yang merender badge jenis "template" memakai `row.template?.nama`
+// (nama formulir yang dipilih), bukan label generik ini.
+export const PENGAJUAN_JENIS_META: Record<'masuk' | 'keluar' | 'rusak' | 'template', StatusMeta> = {
+  masuk: { label: 'Barang Masuk', variant: 'info' },
+  keluar: { label: 'Barang Keluar', variant: 'neutral' },
+  rusak: { label: 'Barang Rusak', variant: 'danger' },
+  template: { label: 'Formulir Template', variant: 'warning' },
+};
+
 export const ASSET_STATUS_META: Record<AssetStatus, StatusMeta> = {
   aktif: { label: 'Aktif', variant: 'success' },
   rusak: { label: 'Rusak', variant: 'danger' },
@@ -26,6 +37,7 @@ export const BARANG_RUSAK_STATUS_META: Record<BarangRusakStatus, StatusMeta> = {
   pengecekan: { label: 'Menunggu Pengecekan', variant: 'warning' },
   retur: { label: 'Bisa Diretur', variant: 'info' },
   rusak: { label: 'Rusak', variant: 'danger' },
+  disimpan_gudang: { label: 'Disimpan ke Gudang', variant: 'success' },
 };
 
 export const BARANG_SERIAL_STATUS_META: Record<'tersedia' | 'terpasang' | 'rusak', StatusMeta> = {
@@ -56,8 +68,14 @@ export const GENERIC_STATUS_META: Record<string, StatusMeta> = {
   nonaktif: { label: 'Nonaktif', variant: 'neutral' },
   sesuai: { label: 'Sesuai', variant: 'success' },
   selisih: { label: 'Selisih', variant: 'warning' },
+  draft: { label: 'Draft', variant: 'warning' },
   selesai: { label: 'Selesai', variant: 'success' },
+  dibatalkan: { label: 'Dibatalkan', variant: 'neutral' },
   diproses: { label: 'Diproses', variant: 'warning' },
+
+  diajukan: { label: 'Menunggu Persetujuan', variant: 'warning' },
+  disetujui: { label: 'Disetujui', variant: 'success' },
+  ditolak: { label: 'Ditolak', variant: 'danger' },
 
   Draft: { label: 'Draft', variant: 'warning' },
   Selesai: { label: 'Selesai', variant: 'success' },

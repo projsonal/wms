@@ -12,7 +12,7 @@ import { ChevronDown, CheckCircle2, RefreshCw, DownloadCloud, AlertTriangle } fr
 import { PageShell } from '@/component/layout/PageShell';
 import { Card } from '@/component/ui/Card';
 import { Button } from '@/component/ui/Button';
-import { Input } from '@/component/ui/FormControls';
+import { Input, PasswordInput } from '@/component/ui/FormControls';
 import { TwoFactorSetupStep } from '@/component/auth/TwoFactorSetupStep';
 import { HumanCheckField } from '@/component/auth/HumanCheckField';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
@@ -26,7 +26,7 @@ import { authApi } from '@/lib/api/auth';
 import { accountApi } from '@/lib/api/account';
 import { maintenanceApi, appInfoApi, type MaintenanceStatus, type AppVersionInfo, type CheckUpdateInfo, type SelfUpdateStatus, type SelfUpdateState } from '@/lib/api/modules';
 import { HttpError } from '@/lib/api/client';
-import { formatDate } from '@/lib/utils/format';
+import { formatDateTime } from '@/lib/utils/format';
 import type { SessionInfo } from '@/types';
 
 type SettingsTab = 'profil' | 'notifikasi' | 'keamanan' | 'tampilan' | 'sistem';
@@ -327,7 +327,10 @@ function SessionsCard(): React.JSX.Element {
             </p>
             <p className="text-xs text-textMuted">
               {session.location} · {session.ipAddress}
-              {session.createdAt ? ` · ${formatDate(session.createdAt)}` : ''}
+              {session.createdAt ? ` · Login sejak ${formatDateTime(session.createdAt)}` : ''}
+            </p>
+            <p className="text-xs text-textMuted">
+              Terakhir aktif {formatDateTime(session.lastActiveAt ?? session.createdAt ?? '')}
             </p>
           </div>
           {session.id ? (
@@ -387,16 +390,14 @@ function ChangePasswordCard(): React.JSX.Element {
       <p className="text-xs text-textMuted">
         Selesaikan verifikasi di bawah untuk memastikan bahwa ini benar-benar kamu.
       </p>
-      <Input
+      <PasswordInput
         label="Password Saat Ini"
-        type="password"
         placeholder="********"
         value={oldPassword}
         onChange={(event) => setOldPassword(event.target.value)}
       />
-      <Input
+      <PasswordInput
         label="Password Baru"
-        type="password"
         placeholder="Minimal 8 karakter"
         value={newPassword}
         onChange={(event) => setNewPassword(event.target.value)}
@@ -880,13 +881,25 @@ function SystemTab(): React.JSX.Element {
     }
   }
 
-  async function handleCheckUpdate(): Promise<void> {
+  async function handleCheckUpdate(options?: { silent?: boolean }): Promise<void> {
+    const silent = options?.silent ?? true;
     setIsCheckingUpdate(true);
     setCheckUpdateError(null);
     try {
-      setCheckUpdateInfo(await appInfoApi.checkUpdate());
+      const info = await appInfoApi.checkUpdate();
+      setCheckUpdateInfo(info);
+      if (!silent) {
+        if (info.updateAvailable) {
+          setIsUpdatePanelOpen(true);
+          toast.success(`Update tersedia: ${info.latestVersion}.`);
+        } else {
+          toast.success(`Sudah versi terbaru (${info.currentVersion}).`);
+        }
+      }
     } catch (err) {
-      setCheckUpdateError(err instanceof HttpError ? err.message : 'Gagal mengecek update.');
+      const msg = err instanceof HttpError ? err.message : 'Gagal mengecek update.';
+      setCheckUpdateError(msg);
+      if (!silent) toast.error(msg);
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -1025,17 +1038,18 @@ function SystemTab(): React.JSX.Element {
               Update Tersedia: {checkUpdateInfo.latestVersion}
               <ChevronDown className={clsx('h-3.5 w-3.5 transition-transform', isUpdatePanelOpen && 'rotate-180')} />
             </button>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleCheckUpdate({ silent: false })}
+              disabled={isCheckingUpdate}
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-borderSoft px-3 py-1.5 text-xs font-semibold text-textMuted hover:border-accent hover:text-accentDark disabled:opacity-60"
+            >
+              <RefreshCw className={clsx('h-3.5 w-3.5', isCheckingUpdate && 'animate-spin')} />
+              {isCheckingUpdate ? 'Mengecek...' : 'Cek Update'}
+            </button>
+          )}
         </div>
-        {versionInfo?.description ? (
-          <div className="rounded-md border border-borderSoft bg-neutralBg p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-textMuted">Tentang Aplikasi</p>
-            <p className="mt-1 text-xs text-text">{versionInfo.description}</p>
-            {versionInfo.developer ? (
-              <p className="mt-1.5 text-[11px] text-textMuted">Dikembangkan oleh {versionInfo.developer}</p>
-            ) : null}
-          </div>
-        ) : null}
 
         {isUpdatePanelOpen && checkUpdateInfo?.updateAvailable ? (
           <CekUpdateSection

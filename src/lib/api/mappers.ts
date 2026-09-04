@@ -48,6 +48,7 @@ export function mapItemToBarangPayload(item: Partial<Item>): Record<string, unkn
     harga_beli: item.price,
 
     stok: item.stock ?? 0,
+    stok_gudang_id: item.warehouseId ? Number(item.warehouseId) : undefined,
     stok_minimum: item.minStock,
     berat_gram: item.weightGram ?? null,
     kategori_id: item.categoryId ? Number(item.categoryId) : undefined,
@@ -93,10 +94,15 @@ export function mapAssetRaw(raw: RawAsset): Asset {
     keterangan: raw.keterangan,
     merek: raw.merek || undefined,
     tipe: raw.tipe || undefined,
+    nilaiAset: raw.nilaiAset ?? 0,
     parentAssetId: raw.parentAssetId ? String(raw.parentAssetId) : undefined,
     jumlahPort: raw.jumlahPort ?? 0,
     barangId: raw.barangId ? String(raw.barangId) : undefined,
     kodeBarang: raw.barang?.kodeBarang || undefined,
+    nopol: raw.nopol || undefined,
+    jenisTransportasi: raw.jenisTransportasi || undefined,
+    nomorBpkb: raw.nomorBpkb || undefined,
+    tahunKendaraan: raw.tahunKendaraan || undefined,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
   };
@@ -108,8 +114,11 @@ export function mapBarangRusakRaw(raw: RawBarangRusak): BarangRusak {
     barangId: raw.barangId ? String(raw.barangId) : undefined,
     labelBarang: raw.labelBarang,
     namaBarang: raw.namaBarang,
-    kodeBarang: raw.barang?.kodeBarang || undefined,
-    merek: raw.barang?.merek || undefined,
+    // Kalau tertaut ke katalog (raw.barang ada), datanya lebih otoritatif
+    // jadi diutamakan; kalau tidak, jatuh ke kolom manual yang diisi
+    // langsung di form Barang Rusak (lihat item Merek/Kode Barang di form).
+    kodeBarang: raw.barang?.kodeBarang || raw.kodeBarang || undefined,
+    merek: raw.barang?.merek || raw.merek || undefined,
     tipe: raw.barang?.tipe || undefined,
     serialNumber: raw.serialNumber || undefined,
     keterangan: raw.keterangan,
@@ -131,6 +140,8 @@ export function mapRingkasanStokRow(raw: RawRingkasanStokRow): StokGudangRecord 
     barangId: String(raw.barangId),
     sku: raw.kodeBarang,
     itemName: raw.namaBarang,
+    merek: raw.merek || undefined,
+    tipe: raw.tipe || undefined,
     gudangId: String(raw.gudangId),
     warehouseName: raw.namaGudang,
     quantity: raw.stok,
@@ -167,5 +178,6 @@ export function mapUserSessionRaw(raw: RawUserSession): UserDeviceSession {
     ipAddress: raw.ipAddress || undefined,
     location: raw.location || undefined,
     createdAt: raw.createdAt,
+    lastActiveAt: raw.lastActiveAt || undefined,
   };
 }

@@ -1,12 +1,13 @@
 'use client';
 
+import Link from 'next/link';
 import useSWR from 'swr';
 import { PageShell } from '@/component/layout/PageShell';
 import { Card } from '@/component/ui/Card';
 import { Button } from '@/component/ui/Button';
 import { TrendChartCard } from '@/component/charts/TrendChartCard';
 import { useAuth } from '@/auth/AuthContext';
-import { dashboardApi } from '@/lib/api/modules';
+import { dashboardApi, pengajuanApi } from '@/lib/api/modules';
 import { listErrorMessage } from '@/lib/utils/errors';
 import { formatCurrency, formatNumber } from '@/lib/utils/format';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
@@ -30,6 +31,11 @@ export function RekapDataContent(): React.JSX.Element {
     () => dashboardApi.trend(),
     { revalidateOnFocus: false },
   );
+  const { data: pengajuanSummary, error: pengajuanError } = useSWR(
+    'rekap-data-pengajuan-summary',
+    () => pengajuanApi.summary(),
+    { revalidateOnFocus: false },
+  );
 
   const trend: TrendPoint[] =
     !trendError && Array.isArray(trendRaw)
@@ -49,6 +55,13 @@ export function RekapDataContent(): React.JSX.Element {
       { kategori: 'Barang Keluar', item: 'Selesai', nilai: formatNumber(summary.barangKeluar.selesai) },
       { kategori: 'Stock Opname', item: 'Draft', nilai: formatNumber(summary.stockOpname.draft) },
       { kategori: 'Stock Opname', item: 'Selesai', nilai: formatNumber(summary.stockOpname.selesai) },
+      ...(pengajuanSummary && !pengajuanError
+        ? [
+            { kategori: 'Pengajuan Barang', item: 'Menunggu Persetujuan', nilai: formatNumber(pengajuanSummary.totalDiajukan) },
+            { kategori: 'Pengajuan Barang', item: 'Disetujui', nilai: formatNumber(pengajuanSummary.totalDisetujui) },
+            { kategori: 'Pengajuan Barang', item: 'Ditolak', nilai: formatNumber(pengajuanSummary.totalDitolak) },
+          ]
+        : []),
     ];
   }
 
@@ -64,7 +77,7 @@ export function RekapDataContent(): React.JSX.Element {
         title: 'Rekap Data Lengkap',
         subtitle: 'Laporan / Rekap Data',
         description:
-          'Ringkasan operasional gudang lintas modul (Kelola Barang, Gudang, Barang Masuk/Keluar, Stock Opname) per tanggal cetak.',
+          'Ringkasan operasional gudang lintas modul (Kelola Barang, Gudang, Barang Masuk/Keluar, Pengajuan Barang, Stock Opname) per tanggal cetak.',
         generatedBy: user?.fullName,
         fileName: 'data rekap lengkap',
       },
@@ -122,6 +135,29 @@ export function RekapDataContent(): React.JSX.Element {
           Cetak Rekap
         </Button>
       </div>
+
+      <Card className="flex flex-col gap-2">
+        <h2 className="text-sm font-bold text-text">Rekap per Hari / per Bulan</h2>
+        <p className="text-xs text-textMuted">
+          Ringkasan di halaman ini adalah cuplikan kondisi terkini. Untuk rekap transaksi yang bisa
+          dikelompokkan per hari atau per bulan (dengan grafik & bisa diekspor Excel/PDF/Word), buka
+          salah satu laporan detail berikut:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/reports/barang-masuk" className="text-xs font-semibold text-accentDark hover:underline">
+            Laporan Barang Masuk →
+          </Link>
+          <Link href="/reports/barang-keluar" className="text-xs font-semibold text-accentDark hover:underline">
+            Laporan Barang Keluar →
+          </Link>
+          <Link href="/reports/pengajuan-barang" className="text-xs font-semibold text-accentDark hover:underline">
+            Laporan Pengajuan Barang →
+          </Link>
+          <Link href="/reports/inventory" className="text-xs font-semibold text-accentDark hover:underline">
+            Laporan Stok & Nilai Inventaris →
+          </Link>
+        </div>
+      </Card>
 
       <TrendChartCard
         title="Tren Barang Masuk & Keluar"

@@ -1,5 +1,3 @@
-
-
 export type DraftDocumentStatus = 'draft' | 'selesai' | 'dibatalkan';
 
 export type BarangMasukStatus = 'Draft' | 'Selesai' | 'Dibatalkan';
@@ -101,6 +99,7 @@ export interface RawBarangMasuk {
   catatan?: string;
   status: BarangMasukStatus;
   items?: RawBarangMasukItem[];
+  isProtected?: boolean;
   updatedAt: string;
 }
 
@@ -109,6 +108,41 @@ export interface RawBarangKeluarItem {
   barangId: number;
   barang?: RawBarang;
   qty: number;
+  jumlahTerpasang: number;
+  jumlahSisa: number;
+  catatanSpesifikasi?: string;
+}
+
+export interface RawSpesifikasiRecapRow {
+  barangId: number;
+  namaBarang: string;
+  kodeBarang: string;
+  satuan?: string;
+  totalTerpakai: number;
+  totalTerpasang: number;
+  totalSisa: number;
+}
+
+// RawSpesifikasiListRow: baris flat 1 item barang keluar (dokumennya sudah
+// selesai) — dipakai bagian Spesifikasi di modal Detail Stok (Kelola
+// Barang), mirip pola "Daftar Unit" di Nomor Seri tapi untuk progres
+// terpakai/terpasang/sisa.
+export interface RawSpesifikasiListRow {
+  itemId: number;
+  barangKeluarId: number;
+  nomorPengeluaran: string;
+  tanggal: string;
+  keperluan?: string;
+  gudangId: number;
+  namaGudang?: string;
+  barangId: number;
+  namaBarang: string;
+  kodeBarang: string;
+  satuan?: string;
+  qty: number;
+  jumlahTerpasang: number;
+  jumlahSisa: number;
+  catatanSpesifikasi?: string;
 }
 
 export interface RawBarangKeluar {
@@ -121,6 +155,72 @@ export interface RawBarangKeluar {
   penerima?: string;
   status: DraftDocumentStatus;
   items?: RawBarangKeluarItem[];
+  isProtected?: boolean;
+  updatedAt: string;
+}
+
+export type PengajuanBarangStatus = 'diajukan' | 'disetujui' | 'ditolak';
+export type PengajuanBarangJenis = 'masuk' | 'keluar' | 'rusak' | 'template';
+
+export interface RawPengajuanBarangItem {
+  id: number;
+  barangId: number;
+  barang?: RawBarang;
+  qty: number;
+}
+
+// RawPengajuanTemplate: satu formulir kosong (docx/pdf) yang diunggah admin
+// — dipilih lewat dropdown "Template Formulir" saat membuat pengajuan jenis
+// "template" (menggantikan "Pengajuan ke Atasan"/jenis "umum" yang lama).
+export interface RawPengajuanTemplate {
+  id: number;
+  nama: string;
+  deskripsi?: string;
+  isActive: boolean;
+  fileName: string;
+  fileSize: number;
+  fileUrl: string;
+  uploadedBy: number;
+  pengunggah?: { id: number; fullName: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RawPengajuanBarang {
+  id: number;
+  nomorPengajuan: string;
+  jenis: PengajuanBarangJenis;
+  gudangId: number;
+  gudang?: RawGudang;
+  tanggal: string;
+  keperluan: string;
+  perihal?: string;
+  templateId?: number | null;
+  template?: RawPengajuanTemplate;
+  status: PengajuanBarangStatus;
+
+  diajukanOleh: number;
+  pengaju?: { id: number; fullName: string };
+  namaPencatat?: string;
+  jabatanPencatat?: string;
+
+  diprosesOleh?: number | null;
+  pemroses?: { id: number; fullName: string };
+  namaGa?: string;
+  jabatanGa?: string;
+  diprosesPada?: string | null;
+  catatanProses?: string;
+
+  barangKeluarId?: number | null;
+  barangKeluar?: RawBarangKeluar;
+
+  barangMasukId?: number | null;
+  barangMasuk?: RawBarangMasuk;
+
+  barangRusak?: RawBarangRusak[];
+
+  items?: RawPengajuanBarangItem[];
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -138,8 +238,14 @@ export interface RawAsset {
   keterangan?: string;
   merek?: string;
   tipe?: string;
+  nilaiAset?: number;
   parentAssetId?: number | null;
   jumlahPort?: number;
+
+  nopol?: string;
+  jenisTransportasi?: string;
+  nomorBpkb?: string;
+  tahunKendaraan?: number;
 
   barangId?: number | null;
   barang?: { id: number; kodeBarang: string; nama: string };
@@ -153,6 +259,12 @@ export interface RawBarangRusak {
   barang?: { id: number; nama: string; kodeBarang: string; merek?: string; tipe?: string };
   labelBarang: string;
   namaBarang: string;
+
+  // Merek/kodeBarang input manual — dipakai kalau barangId kosong (barang
+  // belum terdaftar di katalog Kelola Barang). Kalau barangId terisi,
+  // mapBarangRusakRaw memprioritaskan barang.merek/barang.kodeBarang.
+  merek?: string;
+  kodeBarang?: string;
 
   serialNumber?: string;
   keterangan?: string;
@@ -193,6 +305,7 @@ export interface RawUserSession {
   ipAddress?: string;
   location?: string;
   createdAt: string;
+  lastActiveAt?: string;
 }
 
 export interface RawStockOpnameItem {
@@ -221,8 +334,22 @@ export interface RawRingkasanStokRow {
   barangId: number;
   kodeBarang: string;
   namaBarang: string;
+  merek?: string;
+  tipe?: string;
   gudangId: number;
   namaGudang: string;
   stok: number;
 }
 
+// RawBarangDetailStok: ringkasan real-time "berapa masuk, berapa keluar,
+// stok per gudang berapa" untuk 1 barang — dipakai panel detail di Kelola
+// Barang, dihitung fresh oleh backend setiap request (bukan cache).
+export interface RawBarangDetailStok {
+  barangId: number;
+  kodeBarang: string;
+  namaBarang: string;
+  totalStok: number;
+  totalMasuk: number;
+  totalKeluar: number;
+  perGudang: RawRingkasanStokRow[];
+}

@@ -1,5 +1,3 @@
-
-
 export type UserRole = 'super_admin' | 'admin' | 'karyawan';
 
 export interface ApiEnvelope<T> {
@@ -54,6 +52,7 @@ export interface SessionInfo {
   ipAddress: string;
   location: string;
   createdAt?: string;
+  lastActiveAt?: string;
 
   isCurrent?: boolean;
 }
@@ -196,6 +195,8 @@ export interface StokGudangRecord {
   barangId: string;
   sku: string;
   itemName: string;
+  merek?: string;
+  tipe?: string;
   gudangId: string;
   warehouseName: string;
   quantity: number;
@@ -241,6 +242,8 @@ export interface Asset {
 
   tipe?: string;
 
+  nilaiAset?: number;
+
   parentAssetId?: string;
 
   jumlahPort?: number;
@@ -249,11 +252,18 @@ export interface Asset {
 
   barangId?: string;
   kodeBarang?: string;
+
+  // Khusus jenisAset === 'transportasi'
+  nopol?: string;
+  jenisTransportasi?: string;
+  nomorBpkb?: string;
+  tahunKendaraan?: number;
+
   createdAt: string;
   updatedAt: string;
 }
 
-export type BarangRusakStatus = 'pengecekan' | 'retur' | 'rusak';
+export type BarangRusakStatus = 'pengecekan' | 'retur' | 'rusak' | 'disimpan_gudang';
 
 export interface BarangRusak {
   id: string;
@@ -304,6 +314,7 @@ export interface UserDeviceSession {
   ipAddress?: string;
   location?: string;
   createdAt: string;
+  lastActiveAt?: string;
 }
 
 export type DeliveryStatus = 'menunggu' | 'dijemput' | 'perjalanan' | 'terkirim' | 'gagal';

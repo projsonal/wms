@@ -14,14 +14,16 @@ import { Input, NumberField } from '@/component/ui/FormControls';
 import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
-import { warehousesApi } from '@/lib/api/modules';
+import { warehousesApi, geocodeApi } from '@/lib/api/modules';
 import { useServerPaginatedList } from '@/lib/hooks/useServerPaginatedList';
 import { useDebouncedSearch } from '@/lib/hooks/useDebouncedSearch';
 import { TableSearchInput } from '@/component/ui/TableSearchInput';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
+import { HttpError } from '@/lib/api/client';
 import { formatNumber } from '@/lib/utils/format';
 import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
+import { geocodePrecisionMessage } from '@/lib/utils/geocode-toast';
 import { GENERIC_STATUS_META } from '@/lib/utils/status';
 import type { Warehouse } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
@@ -125,36 +127,28 @@ export function WarehouseListContent(): React.JSX.Element {
     const original = form.address?.trim();
     if (!original) return;
     setIsGeocoding(true);
+    // Timeout sisi klien: backend sekarang mencoba beberapa strategi
+    // query secara berurutan (bisa beberapa detik), tapi tetap dibatasi
+    // supaya tombol "Mencari..." tidak terkunci selamanya kalau ada
+    // masalah jaringan/infra.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
-      const parts = original.split(',').map((p) => p.trim()).filter(Boolean);
-
-      for (let dropCount = 0; dropCount < parts.length; dropCount++) {
-        const attempt = parts.slice(dropCount).join(', ');
-        if (!attempt) break;
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&q=${encodeURIComponent(attempt)}`,
-        );
-        if (!res.ok) continue;
-        const results: Array<{ lat: string; lon: string; display_name: string }> = await res.json();
-        if (results.length > 0) {
-          const { lat, lon, display_name } = results[0];
-          setForm((prev) => ({ ...prev, latitude: Number(lat), longitude: Number(lon) }));
-          toast.success(
-            dropCount === 0
-              ? `Koordinat ditemukan: ${display_name}`
-              : `Alamat persis tidak ketemu, dipakai titik area terdekat: ${display_name} geser pin di peta kalau kurang presisi.`,
-          );
-          return;
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
+      // Pencarian koordinat sekarang lewat backend (bukan langsung ke
+      // Nominatim dari browser) — backend yang membersihkan notasi RT/RW,
+      // mencoba query terstruktur + bertahap, dan melaporkan presisi hasil
+      // dengan jujur. Lihat pkg/geocoding di backend untuk detailnya.
+      const result = await geocodeApi.search(original, controller.signal);
+      setForm((prev) => ({ ...prev, latitude: result.latitude, longitude: result.longitude }));
+      toast.success(geocodePrecisionMessage(result.precision, result.displayName));
+    } catch (err) {
       toast.error(
-        'Alamat ini (di semua tingkat, sampai kabupaten/provinsi) tidak ditemukan di OpenStreetMap coba tulis dengan istilah lain, atau isi koordinat manual (salin dari Google Maps: klik kanan titik lokasi → salin koordinat).',
+        err instanceof HttpError
+          ? err.message
+          : 'Gagal mencari koordinat, coba cek koneksi internet atau isi koordinat manual.',
       );
-    } catch {
-      toast.error('Gagal mencari koordinat, coba cek koneksi internet atau isi koordinat manual.');
     } finally {
+      clearTimeout(timeoutId);
       setIsGeocoding(false);
     }
   }
@@ -279,7 +273,7 @@ export function WarehouseListContent(): React.JSX.Element {
   const WAREHOUSE_PDF_META = {
     title: 'Rekap Data Daftar Gudang',
     subtitle: 'Manajemen / Manajemen Gudang',
-    description: 'Persebaran gudang operasional beserta penanggung jawab (PIC), kapasitas total, dan kapasitas terpakai per lokasi.',
+    description: 'Kumpulan data gudang yang ditentukan.',
   };
 
   function handleExport(): void {
@@ -580,7 +574,7 @@ export function WarehouseListContent(): React.JSX.Element {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Input
-            label="Latitude (opsional)"
+            label="Latitude"
             placeholder="-7.0209099"
             inputMode="decimal"
             value={form.latitude !== undefined ? String(form.latitude) : ''}
@@ -591,7 +585,7 @@ export function WarehouseListContent(): React.JSX.Element {
             }}
           />
           <Input
-            label="Longitude (opsional)"
+            label="Longitude"
             placeholder="107.6495411"
             inputMode="decimal"
             value={form.longitude !== undefined ? String(form.longitude) : ''}

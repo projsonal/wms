@@ -111,8 +111,7 @@ async function refreshAccessToken(): Promise<boolean> {
   if (!currentRefreshToken) {
     return false;
   }
-  if (!refreshPromise) {
-    refreshPromise = (async () => {
+  refreshPromise ??= (async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
           method: 'POST',
@@ -143,7 +142,6 @@ async function refreshAccessToken(): Promise<boolean> {
         refreshPromise = null;
       }
     })();
-  }
   return refreshPromise;
 }
 
@@ -325,18 +323,23 @@ export const API_ORIGIN = (() => {
 export function resolveUploadUrl(path?: string | null): string | undefined {
   if (!path) return undefined;
   if (/^https?:\/\//i.test(path)) return path;
-  return `${API_ORIGIN}${path.startsWith('/') ? path : `/${path}`}`;
+  const resolvedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_ORIGIN}${resolvedPath}`;
 }
 
 export async function uploadFile<TResponse>(
   path: string,
   file: File,
   fieldName = 'file',
+  extraFields?: Record<string, string>,
 ): Promise<TResponse> {
   async function attempt(isRetry: boolean): Promise<Response> {
     const accessToken = getAccessToken();
     const botToken = getBotToken();
     const formData = new FormData();
+    if (extraFields) {
+      Object.entries(extraFields).forEach(([key, value]) => formData.append(key, value));
+    }
     formData.append(fieldName, file);
 
     const headers: Record<string, string> = {};

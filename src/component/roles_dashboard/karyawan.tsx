@@ -16,10 +16,10 @@ import { listErrorMessage } from '@/lib/utils/errors';
 import type { BarangRusak } from '@/types';
 
 const QUICK_ACTIONS = [
-  { label: 'Input Barang Masuk', href: '/(app)/barang-masuk' },
-  { label: 'Input Barang Keluar', href: '/(app)/barang-keluar' },
-  { label: 'Submit Stok Opname', href: '/(app)/inventory' },
-  { label: 'Lihat Kelola Barang', href: '/(app)/kelola-barang' },
+  { label: 'Input Barang Masuk', href: '/barang-masuk' },
+  { label: 'Input Barang Keluar', href: '/barang-keluar' },
+  { label: 'Submit Stok Opname', href: '/inventory' },
+  { label: 'Lihat Kelola Barang', href: '/kelola-barang' },
 ];
 
 function useKaryawanDashboardData() {
@@ -81,14 +81,14 @@ interface MyLaporanRusakCardProps {
   errorMessage?: string;
 }
 
-function MyLaporanRusakCard({ laporan, isLoading, errorMessage }: MyLaporanRusakCardProps): React.JSX.Element {
+function MyLaporanRusakCard({ laporan, isLoading, errorMessage }: Readonly <MyLaporanRusakCardProps>): React.JSX.Element {
   let body: React.JSX.Element;
   if (isLoading) {
     body = <p className="text-xs text-textMuted">Memuat...</p>;
   } else if (errorMessage) {
     body = <p className="text-xs text-dangerText">{errorMessage}</p>;
   } else if (laporan.length === 0) {
-    body = <p className="text-xs text-textMuted">Belum ada laporan barang rusak yang kamu buat. 🎉</p>;
+    body = <p className="text-xs text-textMuted">Belum ada laporan barang rusak yang kamu buat.</p>;
   } else {
     body = (
       <div className="flex flex-col gap-3">
@@ -123,7 +123,7 @@ function MyLaporanRusakCard({ laporan, isLoading, errorMessage }: MyLaporanRusak
         <p className="text-xs text-textMuted">Status pengecekan terbaru dari laporan yang kamu buat</p>
       </div>
       {body}
-      <Link href="/(app)/barang-rusak" className="text-right text-xs font-semibold text-accent hover:underline">
+      <Link href="/barang-rusak" className="text-right text-xs font-semibold text-accent hover:underline">
         Lihat semua laporan
       </Link>
     </Card>

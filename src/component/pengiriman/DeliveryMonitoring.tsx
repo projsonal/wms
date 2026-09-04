@@ -18,6 +18,7 @@ import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { printResiPengiriman } from '@/lib/utils/print-resi';
 import { formatDate } from '@/lib/utils/format';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { DELIVERY_STATUS_META } from '@/lib/utils/status';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
 import type { Delivery } from '@/types';
@@ -95,13 +96,18 @@ export function DeliveryMonitoringContent(): React.JSX.Element {
     { header: 'Resi', accessor: (row: Delivery) => row.code },
     { header: 'Kurir', accessor: (row: Delivery) => row.courierName },
     { header: 'Tujuan', accessor: (row: Delivery) => row.destination },
-    { header: 'Jadwal', accessor: (row: Delivery) => formatDate(row.scheduledAt) },
+    { header: 'Jadwal', accessor: (row: Delivery) => formatTanggalPanjang(row.scheduledAt) },
     { header: 'Status', accessor: (row: Delivery) => DELIVERY_STATUS_META[row.status].label },
   ];
   const DELIVERY_MON_PDF_META = {
     title: 'Rekap Data Gudang — Monitoring Pengiriman',
     subtitle: 'Pengiriman / Monitoring Pengiriman',
     description: 'Status real-time seluruh resi pengiriman yang sedang berjalan maupun sudah selesai, beserta kurir dan tujuan masing-masing.',
+  };
+  const DELIVERY_MON_GRANULARITY: GranularityConfig<Delivery> = {
+    dateAccessor: (row) => row.scheduledAt,
+    sumHeaders: [],
+    groupKeyHeader: 'Status',
   };
 
   async function handleRowAction(action: TableRowAction): Promise<void> {
@@ -128,7 +134,7 @@ export function DeliveryMonitoringContent(): React.JSX.Element {
         await handleBulkProtect(selectedRows);
         return;
       case 'export':
-        requestExport(rows, DELIVERY_MON_COLUMNS, 'monitoring-pengiriman', DELIVERY_MON_PDF_META);
+        requestExport(rows, DELIVERY_MON_COLUMNS, 'monitoring-pengiriman', DELIVERY_MON_PDF_META, DELIVERY_MON_GRANULARITY);
         return;
       case 'print':
         printRowsToPdf(rows, DELIVERY_MON_COLUMNS, { ...DELIVERY_MON_PDF_META, generatedBy: user?.fullName });

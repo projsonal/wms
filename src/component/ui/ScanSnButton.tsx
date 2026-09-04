@@ -1,10 +1,22 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ScanLine, X } from 'lucide-react';
+import { ScanLine, X, Copy } from 'lucide-react';
+import { toast } from 'sonner';
 import type { IScannerControls } from '@zxing/browser';
 import { Modal } from '@/component/ui/Modal';
 import { Button } from '@/component/ui/Button';
+
+const INSECURE_ORIGIN_FLAG_URL = 'chrome://flags/#unsafely-treat-insecure-origin-as-secure';
+
+async function copyFlagUrl(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(INSECURE_ORIGIN_FLAG_URL);
+    toast.success('Alamat flag disalin. Tempel di address bar Chrome (bukan di sini) lalu tekan Enter.');
+  } catch {
+    toast.error('Gagal menyalin otomatis — ketik manual: ' + INSECURE_ORIGIN_FLAG_URL);
+  }
+}
 
 export function ScanSnButton({ onScan }: { onScan: (value: string) => void }): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
@@ -160,14 +172,42 @@ export function ScanSnButton({ onScan }: { onScan: (value: string) => void }): R
       >
         <div className="flex flex-col gap-3">
           {isInsecureContext ? (
-            <p className="rounded-md bg-warningBg px-3 py-2 text-xs text-warningText">
-              Halaman ini dibuka lewat koneksi HTTP biasa (bukan HTTPS) — browser MEMATIKAN akses
-              kamera untuk situs seperti ini demi keamanan, bukan soal HP/browsernya tidak mampu.
-              Perbaikannya: minta admin mengaktifkan HTTPS untuk aplikasi ini, atau kalau sedang
-              testing di jaringan kantor/lokal, buka <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> di
-              Chrome, tambahkan alamat situs ini, lalu restart Chrome. Sementara itu, ketik nomor
-              serinya secara manual di field yang tersedia.
-            </p>
+            <div className="flex flex-col gap-2 rounded-md bg-warningBg px-3 py-2 text-xs text-warningText">
+              <p>
+                Halaman ini dibuka lewat koneksi HTTP biasa (bukan HTTPS) — browser MEMATIKAN akses
+                kamera untuk situs seperti ini demi keamanan, bukan soal HP/browsernya tidak mampu.
+                Perbaikan yang aman &amp; permanen: minta admin mengaktifkan HTTPS untuk aplikasi
+                ini — setelah itu kamera akan langsung berfungsi di semua perangkat tanpa
+                pengaturan tambahan apa pun. Sementara itu, ketik nomor serinya secara manual di
+                field yang tersedia.
+              </p>
+              <p>
+                Chrome sengaja tidak mengizinkan halaman web membuat link yang bisa langsung
+                membuka <span className="font-mono">chrome://flags</span> (ini proteksi keamanan
+                juga) — makanya alamatnya cuma bisa disalin manual, bukan tombol yang langsung
+                pindah halaman:
+              </p>
+              <div className="flex items-center gap-2 rounded bg-white/40 px-2 py-1.5">
+                <span className="flex-1 truncate font-mono text-[11px]">{INSECURE_ORIGIN_FLAG_URL}</span>
+                <button
+                  type="button"
+                  onClick={() => void copyFlagUrl()}
+                  title="Salin alamat flag"
+                  className="flex items-center gap-1 rounded border border-warningText/40 px-2 py-1 font-semibold hover:bg-white/60"
+                >
+                  <Copy className="h-3 w-3" /> Salin
+                </button>
+              </div>
+              <p>
+                <strong>Penting:</strong> mengaktifkan flag ini bukan sekadar mengizinkan kamera di
+                aplikasi ini — flag ini MEMATIKAN proteksi HTTPS untuk alamat yang kamu daftarkan
+                di SEMUA situs yang dibuka lewat browser itu, sehingga HP/laptop tersebut jadi
+                lebih rentan disadap (man-in-the-middle) kalau dipakai di WiFi publik/tidak
+                tepercaya. Cocok dipakai sementara di perangkat kerja yang dikelola admin, tapi
+                bukan pengganti HTTPS yang sesungguhnya — segera minta admin mengaktifkan HTTPS
+                begitu memungkinkan.
+              </p>
+            </div>
           ) : error ? (
             <p className="rounded-md bg-dangerBg px-3 py-2 text-xs text-dangerText">{error}</p>
           ) : (

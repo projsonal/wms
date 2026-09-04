@@ -216,9 +216,15 @@ function LoginWizard(): React.JSX.Element {
         return (
           <ForgotPasswordStep
             initialIdentifier={credentials.username}
-            onBackToLogin={() => {
+            onBackToLogin={(justResetPassword) => {
               setShowForgotHint(false);
               setStep('login');
+              if (justResetPassword) {
+                toast.success(
+                  'Password kamu berhasil diubah. Silakan masuk dengan menggunakan password baru kamu.',
+                  { duration: 6000 },
+                );
+              }
             }}
           />
         );

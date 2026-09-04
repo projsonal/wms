@@ -6,11 +6,12 @@ import { usePathname } from 'next/navigation';
 import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Menu, X, ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
-import { getNavGroupsForRole, ROLE_LABEL } from '@/auth/roles';
+import { getVisibleNavGroups, ROLE_LABEL } from '@/auth/roles';
 import { useAuth } from '@/auth/AuthContext';
 import { useSidebarState } from '@/component/layout/SidebarContext';
 import { useTranslations } from '@/lib/i18n/translations';
 import { useAuthedImage } from '@/lib/hooks/useAuthedImage';
+import { usePermissions } from '@/lib/hooks/usePermissions';
 
 const EXPANDED_WIDTH = 256;
 const COLLAPSED_WIDTH = 76;
@@ -26,7 +27,8 @@ function SidebarBody({
   const { user, logout } = useAuth();
   const t = useTranslations();
   const role = user?.role ?? 'karyawan';
-  const navGroups = getNavGroupsForRole(role);
+  const { can, isLoading: permissionsLoading } = usePermissions();
+  const navGroups = getVisibleNavGroups(role, can, permissionsLoading);
   const avatarUrl = useAuthedImage(user?.avatarUrl);
 
   return (

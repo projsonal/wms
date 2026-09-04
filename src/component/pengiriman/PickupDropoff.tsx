@@ -22,7 +22,7 @@ import { useExportFormat } from '@/lib/hooks/useExportFormat';
 import { printRowsToPdf } from '@/lib/utils/export-pdf';
 import { haversineKm, estimateDurationMin, formatDurationMin } from '@/lib/utils/geo';
 import { printResiPengiriman } from '@/lib/utils/print-resi';
-import { formatDate } from '@/lib/utils/format';
+import { formatTanggalPanjang, type GranularityConfig } from '@/lib/utils/period-grouping';
 import { DELIVERY_STATUS_META } from '@/lib/utils/status';
 import type { Delivery } from '@/types';
 import type { TableRowAction } from '@/component/ui/TableRowActionBar';
@@ -272,13 +272,18 @@ export function PickupDropoffContent(): React.JSX.Element {
     { header: 'Kurir', accessor: (row: Delivery) => row.courierName || '-' },
     { header: 'Jarak (perkiraan)', accessor: (row: Delivery) => distanceLabel(row) },
     { header: 'Estimasi Waktu', accessor: (row: Delivery) => durationLabel(row) },
-    { header: 'Jadwal', accessor: (row: Delivery) => formatDate(row.scheduledAt) },
+    { header: 'Jadwal', accessor: (row: Delivery) => formatTanggalPanjang(row.scheduledAt) },
     { header: 'Status', accessor: (row: Delivery) => DELIVERY_STATUS_META[row.status].label },
   ];
   const PICKUP_DROPOFF_PDF_META = {
     title: 'Rekap Data Gudang — Pickup & Dropoff',
     subtitle: 'Menu Utama / Pickup & Dropoff',
     description: 'Jadwal penjemputan (pickup) dan pengantaran (dropoff) barang, beserta kurir yang ditugaskan dan status terkini masing-masing jadwal.',
+  };
+  const PICKUP_DROPOFF_GRANULARITY: GranularityConfig<Delivery> = {
+    dateAccessor: (row) => row.scheduledAt,
+    sumHeaders: [],
+    groupKeyHeader: 'Status',
   };
 
   async function handleRowAction(action: TableRowAction): Promise<void> {
@@ -301,7 +306,7 @@ export function PickupDropoffContent(): React.JSX.Element {
         await handleBulkProtect(selectedRows);
         return;
       case 'export':
-        requestExport(rows, PICKUP_DROPOFF_COLUMNS, 'pickup-dropoff', PICKUP_DROPOFF_PDF_META);
+        requestExport(rows, PICKUP_DROPOFF_COLUMNS, 'pickup-dropoff', PICKUP_DROPOFF_PDF_META, PICKUP_DROPOFF_GRANULARITY);
         return;
       case 'print':
         printRowsToPdf(rows, PICKUP_DROPOFF_COLUMNS, { ...PICKUP_DROPOFF_PDF_META, generatedBy: user?.fullName });

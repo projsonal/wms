@@ -1,15 +1,21 @@
-import { apiClient, uploadFile } from '@/lib/api/client';
+import { apiClient, downloadFile, uploadFile } from '@/lib/api/client';
 import { createResourceApi } from '@/lib/api/resource';
 import { mapAssetRaw, mapBarangRusakRaw, mapBarangSerialToUnit, mapBarangToItem, mapItemToBarangPayload, mapRingkasanStokRow, mapUserRaw, mapUserSessionRaw } from '@/lib/api/mappers';
 import type {
   RawAsset,
   RawBarang,
+  RawBarangDetailStok,
   RawBarangKeluar,
+  RawBarangKeluarItem,
   RawBarangMasuk,
   RawBarangRusak,
   RawBarangSerial,
   RawGudang,
+  RawPengajuanBarang,
+  RawPengajuanTemplate,
   RawRingkasanStokRow,
+  RawSpesifikasiListRow,
+  RawSpesifikasiRecapRow,
   RawStockOpname,
   RawUser,
   RawUserSession,
@@ -60,6 +66,10 @@ export const itemsApi = {
   delegasikan: (id: string, userId: string) =>
     apiClient.patch<RawBarang>(`/barang/${id}/delegasikan`, { user_id: Number(userId) }),
 
+  batalkanDelegasi: (id: string) => apiClient.patch<RawBarang>(`/barang/${id}/batalkan-delegasi`, {}),
+
+  detailStok: (id: string) => apiClient.get<RawBarangDetailStok>(`/barang/${id}/detail-stok`),
+
   summary: () =>
     apiClient.get<{ totalBarang: number; stokMenipis: number; totalNilaiInventaris: number }>(
       '/barang/summary',
@@ -72,7 +82,8 @@ export const itemsApi = {
     if (merek) params.set('merek', merek);
     if (beratGram !== undefined) params.set('berat_gram', String(beratGram));
     const qs = params.toString();
-    return apiClient.get<{ sku: string }>(`/barang/next-sku${qs ? `?${qs}` : ''}`);
+    const separator = qs ? `?${qs}` : '';
+    return apiClient.get<{ sku: string }>(`/barang/next-sku${separator}`);
   },
 
   checkSku: (sku: string, excludeId?: string) => {
@@ -83,8 +94,8 @@ export const itemsApi = {
 };
 
 export const barangSerialApi = {
-  list: async (params?: ListParams & { barangId?: string; gudangId?: string; status?: string; barangMasukItemId?: string; barangKeluarItemId?: string }): Promise<PaginatedResult<BarangSerialUnit>> => {
-    const { barangId, gudangId, status, barangMasukItemId, barangKeluarItemId, ...listParams } = params ?? {};
+  list: async (params?: ListParams & { barangId?: string; gudangId?: string; status?: string; barangMasukItemId?: string; barangKeluarItemId?: string; urutan?: 'fifo' }): Promise<PaginatedResult<BarangSerialUnit>> => {
+    const { barangId, gudangId, status, barangMasukItemId, barangKeluarItemId, urutan, ...listParams } = params ?? {};
     const query = buildQuery(listParams);
     const extra = [
       barangId ? `barang_id=${barangId}` : '',
@@ -92,8 +103,10 @@ export const barangSerialApi = {
       status ? `status=${status}` : '',
       barangMasukItemId ? `barang_masuk_item_id=${barangMasukItemId}` : '',
       barangKeluarItemId ? `barang_keluar_item_id=${barangKeluarItemId}` : '',
+      urutan ? `urutan=${urutan}` : '',
     ].filter(Boolean).join('&');
-    const url = extra ? `/barang-serial${query}${query ? '&' : '?'}${extra}` : `/barang-serial${query}`;
+    const separator = query ? '&' : '?';
+    const url = extra ? `/barang-serial${query}${separator}${extra}` : `/barang-serial${query}`;
     const { data, meta } = await apiClient.getPaginated<RawBarangSerial>(url);
     return {
       data: data.map(mapBarangSerialToUnit),
@@ -125,6 +138,19 @@ export const barangSerialApi = {
 
   updateStatus: (id: string, status: 'tersedia' | 'terpasang' | 'rusak', catatan?: string) =>
     apiClient.patch<RawBarangSerial>(`/barang-serial/${id}/status`, { status, catatan: catatan ?? '' }),
+  // Dipakai modal "Ubah Unit" (pindah gudang + catatan). Sebelumnya
+  // BarangSerial.tsx memanggil `.update()` yang tidak ada di sini sama
+  // sekali (di-cast paksa lewat `as unknown as {...}` supaya lolos
+  // TypeScript) — setiap simpan langsung gagal dengan TypeError yang
+  // ketangkep sebagai "Gagal memperbarui unit." Method ini + endpoint
+  // PATCH /barang-serial/:id di backend menutup celah itu.
+  update: async (id: string, payload: { gudangId: string; catatan?: string }): Promise<BarangSerialUnit> =>
+    mapBarangSerialToUnit(
+      await apiClient.patch<RawBarangSerial>(`/barang-serial/${id}`, {
+        gudang_id: Number(payload.gudangId),
+        catatan: payload.catatan ?? '',
+      }),
+    ),
   remove: (id: string) => apiClient.delete<void>(`/barang-serial/${id}`),
 };
 
@@ -219,6 +245,9 @@ export const goodsInApi = {
     }),
 
   cancel: (id: string) => apiClient.patch<RawBarangMasuk>(`/barang-masuk/${id}/batalkan`, {}),
+
+  setProtected: (id: string, isProtected: boolean) =>
+    apiClient.patch<RawBarangMasuk>(`/barang-masuk/${id}/protect`, { is_protected: isProtected }),
 };
 
 export interface GoodsOutPayload {
@@ -247,6 +276,123 @@ export const goodsOutApi = {
     }),
 
   cancel: (id: string) => apiClient.patch<RawBarangKeluar>(`/barang-keluar/${id}/batalkan`, {}),
+
+  // Spesifikasi pemasangan: dari Qty yang dikeluarkan pada 1 item, berapa
+  // yang sudah terpasang di lapangan — sisanya dihitung otomatis oleh backend.
+  updateSpesifikasi: (id: string, itemId: string, payload: { jumlahTerpasang: number; catatan?: string }) =>
+    apiClient.patch<RawBarangKeluarItem>(`/barang-keluar/${id}/items/${itemId}/spesifikasi`, payload),
+
+  recapSpesifikasi: (params?: { gudangId?: string; from?: string; to?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.gudangId) query.set('gudang_id', params.gudangId);
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const qs = query.toString();
+    const suffix = qs ? `?${qs}` : '';
+    return apiClient.get<RawSpesifikasiRecapRow[]>(`/barang-keluar/spesifikasi/recap${suffix}`);
+  },
+
+  setProtected: (id: string, isProtected: boolean) =>
+    apiClient.patch<RawBarangKeluar>(`/barang-keluar/${id}/protect`, { is_protected: isProtected }),
+};
+
+// spesifikasiApi: daftar baris spesifikasi per-item (bukan rekap agregat) —
+// dipakai tab "Spesifikasi" di halaman Kelola Barang, gaya sama seperti
+// barangSerialApi.list (filter barang/gudang/status + paginasi server-side).
+export const spesifikasiApi = {
+  list: async (
+    params?: ListParams & { barangId?: string; gudangId?: string; status?: string },
+  ): Promise<PaginatedResult<RawSpesifikasiListRow>> => {
+    const { barangId, gudangId, status, ...listParams } = params ?? {};
+    const query = buildQuery(listParams);
+    const extra = [
+      barangId ? `barang_id=${barangId}` : '',
+      gudangId ? `gudang_id=${gudangId}` : '',
+      status ? `status=${status}` : '',
+    ].filter(Boolean).join('&');
+    const separator = query ? '&' : '?';
+    const url = extra ? `/barang-keluar/spesifikasi${query}${separator}${extra}` : `/barang-keluar/spesifikasi${query}`;
+    const { data, meta } = await apiClient.getPaginated<RawSpesifikasiListRow>(url);
+    return {
+      data,
+      page: meta?.page ?? 1,
+      pageSize: meta?.limit ?? data.length,
+      total: meta?.totalItems ?? data.length,
+    };
+  },
+};
+
+export interface PengajuanPayload {
+  jenis?: 'masuk' | 'keluar' | 'rusak' | 'template';
+  gudangId: number;
+  tanggal: string;
+  keperluan: string;
+  perihal?: string;
+  // templateId: wajib diisi hanya untuk jenis "template" — merujuk ke
+  // formulir yang dipilih dari pengajuanTemplatesApi.list().
+  templateId?: number;
+  namaPencatat?: string;
+  jabatanPencatat?: string;
+  items: GoodsItemPayload[];
+}
+
+export interface PengajuanProsesPayload {
+  namaGa?: string;
+  jabatanGa?: string;
+  catatan?: string;
+}
+
+const pengajuanResource = createResourceApi<RawPengajuanBarang, PengajuanPayload>('/pengajuan-barang');
+
+export const pengajuanApi = {
+  list: pengajuanResource.list,
+  getById: pengajuanResource.getById,
+  create: pengajuanResource.create,
+  update: (id: string, payload: PengajuanPayload) => pengajuanResource.update(id, payload),
+  remove: pengajuanResource.remove,
+
+  summary: () =>
+    apiClient.get<{ totalDiajukan: number; totalDisetujui: number; totalDitolak: number }>(
+      '/pengajuan-barang/summary',
+    ),
+
+  setujui: (id: string, payload?: PengajuanProsesPayload) =>
+    apiClient.patch<RawPengajuanBarang>(`/pengajuan-barang/${id}/setujui`, payload ?? {}),
+
+  tolak: (id: string, payload: PengajuanProsesPayload & { catatan: string }) =>
+    apiClient.patch<RawPengajuanBarang>(`/pengajuan-barang/${id}/tolak`, payload),
+};
+
+// pengajuanTemplatesApi: formulir kosong (docx/pdf) yang diunggah admin,
+// dipilih lewat dropdown "Template Formulir" di menu Pengajuan Barang saat
+// membuat pengajuan jenis "template" — menggantikan "Pengajuan ke Atasan"
+// (jenis "umum") yang lama. "Cetak" untuk jenis ini mengunduh berkas asli
+// formulirnya (lihat `download`), bukan dokumen hasil generate sistem.
+export const pengajuanTemplatesApi = {
+  list: async (
+    params?: { page?: number; pageSize?: number; search?: string; onlyActive?: boolean },
+  ): Promise<PaginatedResult<RawPengajuanTemplate>> => {
+    const { onlyActive, ...rest } = params ?? {};
+    const query = buildQuery({ ...rest, ...(onlyActive ? { only_active: 'true' } : {}) });
+    const { data, meta } = await apiClient.getPaginated<RawPengajuanTemplate>(`/pengajuan-templates${query}`);
+    return {
+      data,
+      page: meta?.page ?? 1,
+      pageSize: meta?.limit ?? data.length,
+      total: meta?.totalItems ?? data.length,
+    };
+  },
+
+  upload: (payload: { nama: string; deskripsi?: string; file: File }) =>
+    uploadFile<RawPengajuanTemplate>('/pengajuan-templates', payload.file, 'file', {
+      nama: payload.nama,
+      ...(payload.deskripsi ? { deskripsi: payload.deskripsi } : {}),
+    }),
+
+  remove: (id: string) => apiClient.delete<null>(`/pengajuan-templates/${id}`),
+
+  download: (template: Pick<RawPengajuanTemplate, 'fileUrl' | 'fileName'>) =>
+    downloadFile(template.fileUrl, template.fileName),
 };
 
 export interface StockOpnameItemPayload {
@@ -302,11 +448,19 @@ export interface AssetPayload {
   merek?: string;
   tipe?: string;
 
+  nilaiAset?: number;
+
   parentAssetId?: number | null;
 
   jumlahPort?: number;
 
   barangId?: number | null;
+
+  // Khusus jenisAset === 'transportasi'
+  nopol?: string;
+  jenisTransportasi?: string;
+  nomorBpkb?: string;
+  tahunKendaraan?: number;
 }
 
 export interface AssetMapPoint {
@@ -365,14 +519,15 @@ export const assetsApi = {
     if (params?.tipeGudang) q.set('tipe_gudang', params.tipeGudang);
     if (params?.status) q.set('status', params.status);
     const qs = q.toString();
-    return apiClient.get<AssetMapPoint[]>(`/aset/map${qs ? `?${qs}` : ''}`);
+    const url = qs ? `/aset/map?${qs}` : '/aset/map';
+    return apiClient.get<AssetMapPoint[]>(url);
   },
   remove: (id: string) => apiClient.delete<void>(`/aset/${id}`),
 };
 
 export interface AssetHistoryEntry {
   id: number;
-  eventType: 'dibuat' | 'status' | 'lokasi' | 'induk' | 'gudang' | 'port';
+  eventType: 'dibuat' | 'status' | 'lokasi' | 'induk' | 'gudang' | 'port' | 'nilai_aset' | 'data_transportasi';
   fieldLama?: string;
   fieldBaru?: string;
   catatan?: string;
@@ -382,6 +537,10 @@ export interface AssetHistoryEntry {
 
 export const assetHistoryApi = {
   list: (assetId: string) => apiClient.get<AssetHistoryEntry[]>(`/aset/${assetId}/riwayat`),
+  // listByBulan: fitur tracking Bulanan — ambil SEMUA kejadian riwayat aset
+  // ini dalam 1 bulan (format "2026-08"), bukan cuma 100 kejadian terakhir.
+  listByBulan: (assetId: string, bulan: string) =>
+    apiClient.get<AssetHistoryEntry[]>(`/aset/${assetId}/riwayat?bulan=${bulan}`),
 };
 
 export interface AssetPortItem {
@@ -410,6 +569,8 @@ export interface BarangRusakPayload {
   barangId?: number | null;
   labelBarang: string;
   namaBarang: string;
+  merek?: string;
+  kodeBarang?: string;
 
   serialNumber?: string;
   keterangan?: string;
@@ -434,6 +595,12 @@ export const barangRusakApi = {
 
   inspeksi: (id: string, jenisBarang: 'retur' | 'rusak') =>
     apiClient.patch<RawBarangRusak>(`/barang-rusak/${id}/inspeksi`, { jenis_barang: jenisBarang }),
+
+  // Pengganti fitur retur-ke-supplier yang sudah dihapus — simpan kembali
+  // barang berstatus "Bisa Diretur" (bukan Rusak Total) sebagai stok ke
+  // gudang yang dipilih.
+  simpanKeGudang: (id: string, gudangId: string) =>
+    apiClient.patch<RawBarangRusak>(`/barang-rusak/${id}/simpan-gudang`, { gudang_id: Number(gudangId) }),
 
   uploadFoto: (id: string, file: File) =>
     uploadFile<RawBarangRusak>(`/barang-rusak/${id}/foto`, file, 'foto'),
@@ -666,6 +833,55 @@ export const appInfoApi = {
   triggerUpdate: () => apiClient.post<SelfUpdateStatus>('/app/update', {}),
 };
 
+// Precision hasil geocoding — dikirim balik backend supaya frontend bisa
+// kasih tahu pengguna dengan jujur seberapa dekat titik yang ditemukan:
+// 'street' = level jalan/nomor rumah (paling akurat), 'area' = level
+// kelurahan/desa/kecamatan, 'region' = cuma level kabupaten/kota/provinsi
+// (sebaiknya digeser manual di peta), 'unknown' = tidak diketahui.
+export type GeocodePrecision = 'street' | 'area' | 'region' | 'unknown';
+
+export interface GeocodeResult {
+  latitude: number;
+  longitude: number;
+  displayName: string;
+  precision: GeocodePrecision;
+}
+
+interface RawGeocodeResult {
+  latitude: number;
+  longitude: number;
+  display_name: string;
+  precision: GeocodePrecision;
+}
+
+// geocodeApi: proxy ke Nominatim/OpenStreetMap lewat backend (bukan
+// dipanggil langsung dari browser) — backend yang menegakkan User-Agent
+// yang benar, rate limit, caching, dan parsing alamat gaya Indonesia
+// (notasi RT/RW) sebelum query ke Nominatim. Lihat pkg/geocoding di
+// backend untuk detailnya.
+export const geocodeApi = {
+  search: async (address: string, signal?: AbortSignal): Promise<GeocodeResult> => {
+    const raw = await apiClient.get<RawGeocodeResult>(
+      `/geocode?address=${encodeURIComponent(address)}`,
+      { signal },
+    );
+    return {
+      latitude: raw.latitude,
+      longitude: raw.longitude,
+      displayName: raw.display_name,
+      precision: raw.precision,
+    };
+  },
+};
+
+export interface LaporanCustomExportPayload {
+  tipe: string;
+  judul: string;
+  format: 'Excel' | 'PDF' | 'Docs';
+  headers: string[];
+  rows: string[][];
+}
+
 export const laporanApi = {
 
   preview: (tipe: string, dari?: string, sampai?: string, granularitas?: 'harian' | 'bulanan' | 'tahunan') => {
@@ -675,6 +891,9 @@ export const laporanApi = {
     if (granularitas) params.set('granularitas', granularitas);
     return apiClient.get<LaporanPreview>(`/laporan/preview?${params.toString()}`);
   },
+
+  exportCustom: (payload: LaporanCustomExportPayload, filename?: string) =>
+    downloadFileWithBody('/laporan/export-custom', payload, filename),
 };
 
 export const dashboardApi = {
@@ -748,21 +967,15 @@ export interface TrashItem {
 }
 
 export const trashApi = {
-  list: (type?: TrashItem['type']) =>
-    apiClient.get<TrashItem[]>(`/trash${type ? `?type=${type}` : ''}`),
+  list: (type?: TrashItem['type']) => {
+    const query = type ? `?type=${type}` : '';
+    return apiClient.get<TrashItem[]>(`/trash${query}`);
+  },
   restore: (type: TrashItem['type'], id: number) =>
     apiClient.post<null>(`/trash/${type}/${id}/restore`),
   purge: (type: TrashItem['type'], id: number) => apiClient.delete<null>(`/trash/${type}/${id}`),
 };
 
-/**
- * NOTE (deliveries / "pengiriman"):
- * No backend spec (Swagger/OpenAPI/sample response) was available for this module.
- * The shape below — endpoint path `/pengiriman`, payload field names, and the extra
- * action endpoints (jadwalkan/mulai/complete/protect/track/lokasi) — was inferred
- * purely from how the pengiriman/* components already consume `deliveriesApi`.
- * Verify the base path and payload keys against the actual backend and adjust if needed.
- */
 export interface DeliveryPayload {
   gudangAsalId: number;
   jenisPengambilan: 'pickup' | 'dropoff';
@@ -799,3 +1012,7 @@ export const deliveriesApi = {
   sendLocation: (id: string, payload: { lat: number; lng: number; kecepatanKmh?: number }) =>
     apiClient.post<null>(`/pengiriman/${id}/lokasi`, payload),
 };
+function downloadFileWithBody(arg0: string, payload: LaporanCustomExportPayload, filename: string | undefined) {
+  throw new Error('Function not implemented.');
+}
+

@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { toast } from 'sonner';
 import { useAuth } from '@/auth/AuthContext';
 import { maintenanceApi, type MaintenanceStatus } from '@/lib/api/modules';
 import { StatusScreen } from '@/component/system/StatusScreen';
+import { usePermissions } from '@/lib/hooks/usePermissions';
+import { getModuleForPath } from '@/auth/roles';
 import type { UserRole } from '@/types';
 
 interface RoleGuardProps {
@@ -69,6 +71,9 @@ function MaintenanceBlockedScreen({ status }: Readonly<{ status: MaintenanceStat
 export function RoleGuard({ children, allowedRoles }: Readonly<RoleGuardProps>): React.JSX.Element | null {
   const { user, isLoading, serverUnreachable } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const { can, isLoading: permissionsLoading, hasError: permissionsError } = usePermissions();
+  const requiredModule = getModuleForPath(pathname);
   const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
   const wasActiveRef = useRef(false);
 
@@ -86,8 +91,20 @@ export function RoleGuard({ children, allowedRoles }: Readonly<RoleGuardProps>):
     }
     if (allowedRoles && !allowedRoles.includes(user.role)) {
       router.replace('/status/403');
+      return;
     }
-  }, [isLoading, user, allowedRoles, router, serverUnreachable]);
+    // Blokir akses langsung lewat URL kalau "Lihat" untuk modul halaman ini
+    // dimatikan buat role user (diatur lewat Perizinan Hak Akses User) —
+    // bukan cuma menyembunyikan link-nya di sidebar. Tunggu matriks izin
+    // selesai dimuat dulu supaya tidak salah redirect saat masih fetching.
+    // permissionsError SENGAJA dikecualikan di sini — matrix izin gagal
+    // dimuat (server/koneksi bermasalah) BUKAN berarti user ditolak, jadi
+    // jangan redirect ke 403 "tidak ada izin" untuk kasus itu (lihat render
+    // fallback "Coba Lagi" di bawah untuk kasus error ini).
+    if (requiredModule && !permissionsLoading && !permissionsError && !can(requiredModule, 'view')) {
+      router.replace('/status/403?reason=modul');
+    }
+  }, [isLoading, user, allowedRoles, router, serverUnreachable, requiredModule, permissionsLoading, permissionsError, can]);
 
   useEffect(() => {
     if (!user || user.role === 'super_admin') {
@@ -147,6 +164,28 @@ export function RoleGuard({ children, allowedRoles }: Readonly<RoleGuardProps>):
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return null;
+  }
+
+  if (requiredModule) {
+    if (permissionsLoading) {
+      return (
+        <div className="flex h-screen items-center justify-center bg-bg text-textMuted">
+          Memuat halaman...
+        </div>
+      );
+    }
+    if (permissionsError) {
+      return (
+        <StatusScreen
+          code="503"
+          message="Gagal memuat data izin akses kamu. Ini biasanya sementara — coba lagi, atau hubungi Super Admin kalau terus terjadi."
+          actions={[{ label: 'Coba Lagi', onClick: () => window.location.reload(), variant: 'primary' }]}
+        />
+      );
+    }
+    if (!can(requiredModule, 'view')) {
+      return null;
+    }
   }
 
   if (maintenance?.isActive && user.role !== 'super_admin') {

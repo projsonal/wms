@@ -14,7 +14,8 @@ import { ASSET_STATUS_META } from '@/lib/utils/status';
 import { resolveGudangLabel } from '@/lib/utils/gudang-labels';
 import { assetsApi, assetPortApi, assetHistoryApi, itemsApi, type AssetMapPoint, type AssetPortItem, type AssetHistoryEntry } from '@/lib/api/modules';
 import { friendlyError } from '@/lib/utils/errors';
-import type { JenisAset, AssetStatus } from '@/types';
+import { formatBulanTahun } from '@/lib/utils/period-grouping';
+import type { JenisAset, AssetStatus, Asset } from '@/types';
 
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
@@ -33,6 +34,12 @@ const JENIS_MARKER_META: Record<string, { abbr: string; color: string; label: st
   transportasi: { abbr: 'TR', color: '#6b7280', label: 'Transportasi' },
 };
 
+// 'transportasi' sengaja TIDAK dimasukkan di sini — aset transportasi
+// (kendaraan) tidak punya titik koordinat tetap (lihat
+// model.JenisAsetPunyaKoordinat di backend) karena posisinya berubah-ubah
+// dan baru bisa dilacak real-time kalau kendaraannya dipasangi sensor
+// GPS, bukan lewat penunjukan titik manual seperti tiang/ODC/dst. Jadi
+// peta/tracking ini memang khusus aset berkoordinat tetap.
 const JENIS_URUTAN: JenisAset[] = ['tiang', 'odc', 'ont', 'odp', 'olt'];
 const STATUS_URUTAN: AssetStatus[] = ['aktif', 'rusak', 'nonaktif'];
 
@@ -82,6 +89,20 @@ function AssetTrackingMapBody(): React.JSX.Element {
   const [showCable, setShowCable] = useState(true);
 
   const [viewMode, setViewMode] = useState<'peta' | 'sederhana'>('peta');
+
+  // Tab Infrastruktur/Transportasi KHUSUS di tab "Sederhana" — sengaja
+  // dipisah dari `allPoints`/loadPoints di atas: itu datanya dari
+  // assetsApi.map() yang MEMANG cuma berisi aset berkoordinat tetap (jaringan),
+  // aset transportasi (kendaraan) tidak pernah ada di situ (lihat komentar
+  // JENIS_URUTAN). Supaya tab "Sederhana" bisa menyamai pemisahan yang sudah
+  // ada di menu Manajemen Aset Barang (Infrastruktur vs Transportasi), data
+  // transportasi dimuat terpisah lewat assetsApi.list() biasa (bukan .map()),
+  // dan HANYA dipakai di tampilan Sederhana — tab "Peta" tidak tersentuh sama
+  // sekali oleh perubahan ini.
+  const [sederhanaTab, setSederhanaTab] = useState<'infrastruktur' | 'transportasi'>('infrastruktur');
+  const [transportasiAssets, setTransportasiAssets] = useState<Asset[]>([]);
+  const [isLoadingTransportasi, setIsLoadingTransportasi] = useState(false);
+  const [hasLoadedTransportasi, setHasLoadedTransportasi] = useState(false);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedPoint, setSelectedPoint] = useState<AssetMapPoint | null>(null);
@@ -152,6 +173,30 @@ function AssetTrackingMapBody(): React.JSX.Element {
 
     loadPoints();
   }, []);
+
+  useEffect(() => {
+    if (sederhanaTab !== 'transportasi' || hasLoadedTransportasi) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingTransportasi(true);
+    assetsApi
+      .list({ pageSize: 500 })
+      .then((res) => {
+        if (cancelled) return;
+        setTransportasiAssets(res.data.filter((a) => a.jenisAset === 'transportasi'));
+        setHasLoadedTransportasi(true);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error('Gagal memuat data aset transportasi.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingTransportasi(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sederhanaTab, hasLoadedTransportasi]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -353,25 +398,60 @@ function AssetTrackingMapBody(): React.JSX.Element {
       </div>
 
       {viewMode === 'sederhana' ? (
+        <>
+          {/*
+            Sesuai pemisahan yang sudah ada di menu Manajemen Aset Barang:
+            Infrastruktur (aset jaringan berkoordinat tetap — Tiang/ODC/ONT/
+            ODP/OLT) vs Transportasi (kendaraan, tidak berkoordinat). Tab
+            "Peta" tidak punya konsep ini karena memang cuma menampilkan aset
+            berkoordinat.
+          */}
+          <div className="mt-4 flex items-center gap-1 rounded-full bg-neutralBg p-1 text-xs w-fit">
+            <button
+              type="button"
+              onClick={() => setSederhanaTab('infrastruktur')}
+              className={`rounded-full px-3 py-1.5 font-semibold transition-colors ${
+                sederhanaTab === 'infrastruktur' ? 'bg-accent text-white' : 'text-textMuted hover:text-text'
+              }`}
+            >
+              Infrastruktur
+            </button>
+            <button
+              type="button"
+              onClick={() => setSederhanaTab('transportasi')}
+              className={`rounded-full px-3 py-1.5 font-semibold transition-colors ${
+                sederhanaTab === 'transportasi' ? 'bg-accent text-white' : 'text-textMuted hover:text-text'
+              }`}
+            >
+              Transportasi
+            </button>
+          </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
-          <HierarchyPanel
-            points={allPoints}
-            selectedId={selectedPoint?.id ?? null}
-            onSelect={(p) => {
-              setSelectedPoint(p);
-              setShowPortPanel(false);
-            }}
-          />
-          <DetailTrackingTable
-            points={allPoints}
-            selectedId={selectedPoint?.id ?? null}
-            onSelect={(p) => {
-              setSelectedPoint(p);
-              setShowPortPanel(false);
-            }}
-          />
-        </div>
+          {sederhanaTab === 'infrastruktur' ? (
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
+              <HierarchyPanel
+                points={allPoints}
+                selectedId={selectedPoint?.id ?? null}
+                onSelect={(p) => {
+                  setSelectedPoint(p);
+                  setShowPortPanel(false);
+                }}
+              />
+              <DetailTrackingTable
+                points={allPoints}
+                selectedId={selectedPoint?.id ?? null}
+                onSelect={(p) => {
+                  setSelectedPoint(p);
+                  setShowPortPanel(false);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="mt-4">
+              <TransportasiTrackingTable assets={transportasiAssets} isLoading={isLoadingTransportasi} />
+            </div>
+          )}
+        </>
       ) : (
 
         <div className="relative mt-4">
@@ -865,6 +945,75 @@ function DetailTrackingTable({
   );
 }
 
+// Tabel sederhana untuk tab "Transportasi" — kolomnya beda dari
+// DetailTrackingTable (jaringan) karena data yang relevan buat kendaraan juga
+// beda (Nopol/Jenis Kendaraan/Tahun, bukan Port/Kode Barang), mengikuti
+// kolom "Data Transportasi" yang sama seperti di menu Manajemen Aset Barang.
+function TransportasiTrackingTable({
+  assets,
+  isLoading,
+}: Readonly<{ assets: Asset[]; isLoading: boolean }>): React.JSX.Element {
+  const sorted = useMemo(
+    () => [...assets].sort((a, b) => a.gudangNama.localeCompare(b.gudangNama) || a.nama.localeCompare(b.nama)),
+    [assets],
+  );
+
+  if (isLoading) {
+    return (
+      <Card>
+        <p className="text-xs text-textMuted">Memuat data aset transportasi...</p>
+      </Card>
+    );
+  }
+
+  if (sorted.length === 0) {
+    return (
+      <Card>
+        <p className="text-xs text-textMuted">Belum ada aset transportasi yang terdaftar.</p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-x-auto p-0">
+      <table className="w-full min-w-[760px] text-left text-xs">
+        <thead className="border-b border-borderSoft bg-neutralBg/60 text-[10px] uppercase tracking-wide text-textMuted">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Nama</th>
+            <th className="px-3 py-2 font-semibold">Nomor Polisi</th>
+            <th className="px-3 py-2 font-semibold">Jenis Kendaraan</th>
+            <th className="px-3 py-2 font-semibold">Merek / Tipe</th>
+            <th className="px-3 py-2 font-semibold">Tahun</th>
+            <th className="px-3 py-2 font-semibold">Status</th>
+            <th className="px-3 py-2 font-semibold">Gudang</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((a) => {
+            const statusMeta = ASSET_STATUS_META[a.status];
+            return (
+              <tr key={a.id} className="border-b border-borderSoft/60 last:border-b-0 hover:bg-neutralBg/60">
+                <td className="px-3 py-2">
+                  <p className="font-semibold text-text">{a.nama}</p>
+                  <p className="font-mono text-[10px] text-textMuted">{a.labelRsd || '-'}</p>
+                </td>
+                <td className="px-3 py-2 font-mono text-textMuted">{a.nopol || '-'}</td>
+                <td className="px-3 py-2 text-textMuted">{a.jenisTransportasi || '-'}</td>
+                <td className="px-3 py-2 text-textMuted">{[a.merek, a.tipe].filter(Boolean).join(' ') || '-'}</td>
+                <td className="px-3 py-2 text-textMuted">{a.tahunKendaraan ?? '-'}</td>
+                <td className="px-3 py-2">
+                  <Badge label={statusMeta.label} variant={statusMeta.variant} />
+                </td>
+                <td className="px-3 py-2 text-textMuted">{a.gudangNama}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
 function HierarchyPanel({
   points,
   selectedId,
@@ -1101,17 +1250,84 @@ const EVENT_TYPE_LABEL: Record<AssetHistoryEntry['eventType'], string> = {
 
   gudang: 'Dipindahkan ke gudang lain',
   port: 'Port diubah',
+  nilai_aset: 'Nilai aset diubah',
+  data_transportasi: 'Data transportasi diubah',
 };
 
+type HistoryTrackingMode = 'harian' | 'bulanan';
+
+function currentBulan(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function shiftBulan(bulan: string, delta: number): string {
+  const [y, m] = bulan.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+interface AssetHistoryToolbarProps {
+  mode: HistoryTrackingMode;
+  onModeChange: (mode: HistoryTrackingMode) => void;
+  bulan: string;
+  onShiftBulan: (delta: number) => void;
+}
+
+function AssetHistoryToolbar({ mode, onModeChange, bulan, onShiftBulan }: Readonly<AssetHistoryToolbarProps>): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex w-fit rounded-full border border-borderSoft bg-surfaceAlt p-0.5">
+        {(['harian', 'bulanan'] as const).map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onModeChange(opt)}
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize transition-colors ${
+              mode === opt ? 'bg-accentDark text-white' : 'text-textMuted hover:text-text'
+            }`}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+      {mode === 'bulanan' ? (
+        <div className="flex items-center gap-1.5 text-[11px] text-textMuted">
+          <button
+            type="button"
+            onClick={() => onShiftBulan(-1)}
+            className="rounded p-0.5 hover:bg-neutralBg hover:text-accentDark"
+            aria-label="Bulan sebelumnya"
+          >
+            ‹
+          </button>
+          <span className="min-w-[8rem] text-center font-semibold text-text">{formatBulanTahun(`${bulan}-01`)}</span>
+          <button
+            type="button"
+            onClick={() => onShiftBulan(1)}
+            className="rounded p-0.5 hover:bg-neutralBg hover:text-accentDark"
+            aria-label="Bulan berikutnya"
+          >
+            ›
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AssetHistoryPanel({ assetId }: Readonly<{ assetId: number }>): React.JSX.Element {
+  const [mode, setMode] = useState<HistoryTrackingMode>('harian');
+  const [bulan, setBulan] = useState(currentBulan);
   const [entries, setEntries] = useState<AssetHistoryEntry[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    assetHistoryApi
-      .list(String(assetId))
+    const request =
+      mode === 'bulanan' ? assetHistoryApi.listByBulan(String(assetId), bulan) : assetHistoryApi.list(String(assetId));
+    request
       .then((res) => {
         if (!cancelled) setEntries(res);
       })
@@ -1124,14 +1340,19 @@ function AssetHistoryPanel({ assetId }: Readonly<{ assetId: number }>): React.JS
     return () => {
       cancelled = true;
     };
-  }, [assetId]);
+  }, [assetId, mode, bulan]);
 
   let historyContent: React.JSX.Element;
   if (isLoading) {
     historyContent = <p className="text-xs text-textMuted">Memuat riwayat...</p>;
   } else if (!entries || entries.length === 0) {
+    const bulanLabel = formatBulanTahun(`${bulan}-01`);
     historyContent = (
-      <p className="text-xs text-textMuted">Belum ada riwayat perubahan tercatat untuk aset ini.</p>
+      <p className="text-xs text-textMuted">
+        {mode === 'bulanan'
+          ? `Tidak ada riwayat perubahan tercatat pada ${bulanLabel}.`
+          : 'Belum ada riwayat perubahan tercatat untuk aset ini.'}
+      </p>
     );
   } else {
     historyContent = (
@@ -1159,6 +1380,12 @@ function AssetHistoryPanel({ assetId }: Readonly<{ assetId: number }>): React.JS
   return (
     <div className="flex flex-col gap-2 border-t border-borderSoft pt-3">
       <h4 className="text-xs font-bold uppercase tracking-wide text-textMuted">Riwayat Perubahan</h4>
+      <AssetHistoryToolbar
+        mode={mode}
+        onModeChange={setMode}
+        bulan={bulan}
+        onShiftBulan={(delta) => setBulan((prev) => shiftBulan(prev, delta))}
+      />
       {historyContent}
     </div>
   );

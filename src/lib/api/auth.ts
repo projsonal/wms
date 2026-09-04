@@ -95,10 +95,15 @@ export const authApi = {
   revokeSession: (id: number) =>
     apiClient.delete<{ revokedCurrent?: boolean }>(`/auth/sessions/${id}`),
 
-  resetPassword: (payload: {
+  // Alur lupa password satu langkah — TANPA kode OTP WhatsApp (fitur OTP
+  // WhatsApp untuk reset password sudah dihapus sepenuhnya, termasuk dari
+  // backend). Catatan: alur ini tidak membuktikan kepemilikan akun (cukup
+  // username/email yang benar + lolos human-check) — lihat catatan
+  // keamanan di Controller.ForgotPassword pada backend.
+  forgotPassword: (payload: {
     identifier: string;
     newPassword: string;
     newPasswordConfirmation: string;
     humanCheckToken: string;
-  }) => apiClient.post<null>('/auth/password/reset', payload, { skipAuth: true }),
+  }) => apiClient.post<null>('/auth/password/forgot', payload, { skipAuth: true }),
 };

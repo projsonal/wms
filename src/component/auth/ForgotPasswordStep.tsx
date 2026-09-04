@@ -6,19 +6,31 @@ import { Input, PasswordInput } from '@/component/ui/FormControls';
 import { HumanCheckField } from '@/component/auth/HumanCheckField';
 import { authApi } from '@/lib/api/auth';
 import { HttpError } from '@/lib/api/client';
-import { Icon } from "@iconify/react";
+import { CheckCircle2 } from 'lucide-react';
 
 
 interface ForgotPasswordStepProps {
   initialIdentifier?: string;
-  onBackToLogin: () => void;
+  onBackToLogin: (justResetPassword?: boolean) => void;
 }
+
+// Alur lupa password satu langkah (username + password baru), TANPA kode
+// OTP WhatsApp — fitur OTP WhatsApp untuk reset password (kirim kode 6
+// digit ke nomor terdaftar sebagai bukti kepemilikan akun) sudah dihapus
+// sepenuhnya dari sistem ini atas permintaan eksplisit pemilik sistem,
+// karena pengiriman OTP via WhatsApp tidak bisa diandalkan di lingkungan
+// ini. Ini sekarang satu-satunya alur lupa password yang tersedia.
+//
+// PERINGATAN: alur ini TIDAK membuktikan kepemilikan akun — siapa pun yang
+// tahu/menebak username bisa mengganti passwordnya lewat sini selama lolos
+// verifikasi "bukan robot".
+type Phase = 'request' | 'done';
 
 export function ForgotPasswordStep({
   initialIdentifier = '',
   onBackToLogin,
 }: Readonly<ForgotPasswordStepProps>): React.JSX.Element {
-  const [phase, setPhase] = useState<'form' | 'done'>('form');
+  const [phase, setPhase] = useState<Phase>('request');
   const [identifier, setIdentifier] = useState(initialIdentifier);
   const [newPassword, setNewPassword] = useState('');
   const [newPasswordConfirmation, setNewPasswordConfirmation] = useState('');
@@ -27,35 +39,42 @@ export function ForgotPasswordStep({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function handleSubmit(): Promise<void> {
-    setError(null);
+  function validate(): string | null {
     if (!identifier.trim()) {
-      setError('Masukkan username akun kamu terlebih dahulu.');
-      return;
+      return 'Masukkan username akun kamu terlebih dahulu.';
     }
     if (newPassword.length < 8) {
-      setError('Password baru minimal 8 karakter.');
-      return;
+      return 'Password baru minimal 8 karakter.';
     }
     if (newPassword !== newPasswordConfirmation) {
-      setError('Konfirmasi password tidak sama.');
-      return;
+      return 'Konfirmasi password tidak sama.';
     }
     if (!humanCheckToken) {
-      setError('Tunggu proses verifikasi "kamu bukan robot" selesai terlebehi dulu.');
+      return 'Tunggu proses verifikasi "kamu bukan robot" selesai terlebih dulu.';
+    }
+    return null;
+  }
+
+  async function handleSubmit(): Promise<void> {
+    setError(null);
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setIsSubmitting(true);
     try {
-      await authApi.resetPassword({
+      await authApi.forgotPassword({
         identifier: identifier.trim(),
         newPassword,
         newPasswordConfirmation,
-        humanCheckToken,
+        humanCheckToken: humanCheckToken as string,
       });
       setPhase('done');
     } catch (err) {
-      setError(err instanceof HttpError ? err.message : 'Gagal menyimpan password baru, silakan cek apakah udah sama passwordnya kemudian coba lagi.');
+      setError(
+        err instanceof HttpError ? err.message : 'Gagal mengganti password, silakan coba lagi.',
+      );
       setHumanCheckToken(null);
       setResetKey((k) => k + 1);
     } finally {
@@ -63,14 +82,13 @@ export function ForgotPasswordStep({
     }
   }
 
-  if (phase === 'form') {
+  if (phase === 'request') {
     return (
       <div className="flex flex-col gap-4 text-center">
         <div>
           <h2 className="text-base font-semibold text-text">Lupa Password</h2>
           <p className="mt-1 text-xs text-textMuted">
-            Masukkan password baru. Selesaikan verifikasi di bawah untuk
-            memastikan bahwa kamu bukan robot.
+            Masukkan username akun kamu beserta password baru yang ingin dipakai.
           </p>
         </div>
         <Input
@@ -104,10 +122,8 @@ export function ForgotPasswordStep({
         <Button onClick={handleSubmit} loading={isSubmitting} disabled={!humanCheckToken}>
           Ganti Password
         </Button>
-        <button type="button" onClick={onBackToLogin} className="text-xs text-textMuted underline">
-            <Icon icon="ep:success-filled"
-            className="h-5 w-5"
-            aria-hidden="true"></Icon>
+        <button type="button" onClick={() => onBackToLogin()} className="text-xs text-textMuted underline">
+          Sudah ingat password? Kembali ke halaman masuk
         </button>
       </div>
     );
@@ -116,13 +132,11 @@ export function ForgotPasswordStep({
   return (
     <div className="flex flex-col items-center gap-3 py-4 text-center">
       <span className="flex h-14 w-14 items-center justify-center rounded-full bg-successBg text-2xl text-successText">
-        <Icon icon="lucide:success-filled"
-            className="h-5 w-5"
-            aria-hidden="true"></Icon>
+        <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
       </span>
       <h2 className="text-base font-semibold text-text">Password Berhasil Diubah</h2>
       <p className="text-xs text-textMuted">Silakan masuk kembali menggunakan password barumu.</p>
-      <Button onClick={onBackToLogin} className="w-full">
+      <Button onClick={() => onBackToLogin(true)} className="w-full">
         Ke Halaman Masuk
       </Button>
     </div>

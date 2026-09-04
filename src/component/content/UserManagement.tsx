@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { Pencil, Trash2, Monitor } from 'lucide-react';
+import { Pencil, Trash2, Monitor, Smartphone, Tablet, HelpCircle } from 'lucide-react';
 import { PageShell } from '@/component/layout/PageShell';
 import { RoleGuard } from '@/component/layout/RoleGuard';
 import { Badge } from '@/component/ui/Badge';
@@ -12,7 +12,7 @@ import { Button } from '@/component/ui/Button';
 import { Card } from '@/component/ui/Card';
 import { DataTable, type DataTableColumn } from '@/component/ui/DataTable';
 import { Modal } from '@/component/ui/Modal';
-import { Input, Select } from '@/component/ui/FormControls';
+import { Input, Select, PasswordInput } from '@/component/ui/FormControls';
 import { StatsRow } from '@/component/ui/StatsRow';
 import { useConfirm } from '@/component/ui/ConfirmDialog';
 import { useAuth } from '@/auth/AuthContext';
@@ -25,11 +25,14 @@ import { HttpError } from '@/lib/api/client';
 import { friendlyError, listErrorMessage } from '@/lib/utils/errors';
 import { PERMISSION_MODULES } from '@/lib/data/permission-modules';
 import { ROLE_LABEL } from '@/auth/roles';
-import { formatDate } from '@/lib/utils/format';
+import { formatDate, formatDateTime } from '@/lib/utils/format';
 import { ASSET_STATUS_META, JENIS_ASET_META } from '@/lib/utils/status';
 import type { ManagedUser, UserDeviceSession, UserRole } from '@/types';
 
 const EMPTY_FORM: ManagedUserPayload = { name: '', username: '', email: '', phoneNumber: '', role: 'karyawan', password: '' };
+
+// Interval polling daftar perangkat login (lihat modal "Perangkat Login").
+const DEVICES_POLL_INTERVAL_MS = 10000;
 
 const TOTAL_MODUL_TERDAFTAR = Object.values(PERMISSION_MODULES).reduce(
   (sum, mods) => sum + mods.length,
@@ -74,7 +77,7 @@ function RecentAssetsCard(): React.JSX.Element {
                   {jenisMeta?.label ?? asset.jenisAset} • {asset.labelRsd ?? asset.kodeBa} • {asset.gudangNama}
                 </p>
               </div>
-              <Badge label={statusMeta.label} variant={statusMeta.variant} />
+              <Badge label={statusMeta?.label ?? asset.status} variant={statusMeta?.variant} />
             </li>
           );
         })}
@@ -300,6 +303,24 @@ function UserManagementBody(): React.JSX.Element {
     }
   }
 
+  // Daftar perangkat login diperbarui otomatis (polling) selama modal ini
+  // terbuka — supaya sesi yang sudah kedaluwarsa/tercabut dari perangkat
+  // lain (mis. dicabut admin lain di tab berbeda) hilang dari daftar tanpa
+  // perlu tutup-buka modal manual. Gagal silent (tanpa toast) supaya tidak
+  // spam notifikasi tiap 10 detik kalau koneksi lagi tidak stabil — daftar
+  // lama tetap ditampilkan sampai polling berikutnya berhasil.
+  useEffect(() => {
+    if (!devicesUser) return;
+    const userId = devicesUser.id;
+    const interval = window.setInterval(() => {
+      usersApi
+        .listSessions(userId)
+        .then((list) => setDevices(list))
+        .catch(() => undefined);
+    }, DEVICES_POLL_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [devicesUser]);
+
   async function handleRevokeSession(session: UserDeviceSession): Promise<void> {
     if (!devicesUser) return;
     const ok = await confirm({
@@ -321,6 +342,19 @@ function UserManagementBody(): React.JSX.Element {
     }
   }
 
+  function deviceIconFor(deviceType?: string): React.JSX.Element {
+    switch (deviceType) {
+      case 'mobile':
+        return <Smartphone className="h-4 w-4" />;
+      case 'tablet':
+        return <Tablet className="h-4 w-4" />;
+      case 'desktop':
+        return <Monitor className="h-4 w-4" />;
+      default:
+        return <HelpCircle className="h-4 w-4" />;
+    }
+  }
+
   function renderDevicesBody(): React.JSX.Element {
     if (isLoadingDevices) {
       return <p className="text-xs text-textMuted">Memuat daftar perangkat…</p>;
@@ -339,20 +373,28 @@ function UserManagementBody(): React.JSX.Element {
             key={session.id}
             className="flex items-center justify-between gap-3 rounded-md border border-borderSoft p-3"
           >
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-text">
-                {session.browser ?? 'Browser tidak diketahui'}
-                {session.browserVersion ? ` ${session.browserVersion}` : ''}
-                {' · '}
-                {session.os ?? 'OS tidak diketahui'}
-                {session.osVersion ? ` ${session.osVersion}` : ''}
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-neutralBg text-textMuted">
+                {deviceIconFor(session.deviceType)}
               </span>
-              <span className="text-xs text-textMuted">
-                {session.deviceType ?? 'Perangkat tidak diketahui'}
-                {session.location ? ` · ${session.location}` : ''}
-                {session.ipAddress ? ` · ${session.ipAddress}` : ''}
-              </span>
-              <span className="text-xs text-textMuted">Login sejak {formatDate(session.createdAt)}</span>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-text">
+                  {session.browser ?? 'Browser tidak diketahui'}
+                  {session.browserVersion ? ` ${session.browserVersion}` : ''}
+                  {' · '}
+                  {session.os ?? 'OS tidak diketahui'}
+                  {session.osVersion ? ` ${session.osVersion}` : ''}
+                </span>
+                <span className="text-xs text-textMuted">
+                  {session.deviceType ?? 'Perangkat tidak diketahui'}
+                  {session.location ? ` · ${session.location}` : ''}
+                  {session.ipAddress ? ` · ${session.ipAddress}` : ''}
+                </span>
+                <span className="text-xs text-textMuted">Login sejak {formatDateTime(session.createdAt)}</span>
+                <span className="text-xs text-textMuted">
+                  Terakhir aktif {session.lastActiveAt ? formatDateTime(session.lastActiveAt) : formatDateTime(session.createdAt)}
+                </span>
+              </div>
             </div>
             <Button
               variant="secondary"
@@ -638,9 +680,8 @@ function UserManagementBody(): React.JSX.Element {
           ]}
         />
         {!editingId ? (
-          <Input
+          <PasswordInput
             label="Password"
-            type="password"
             placeholder="Minimal 8 karakter"
             value={form.password ?? ''}
             onChange={(event) => setForm({ ...form, password: event.target.value })}
@@ -660,7 +701,9 @@ function UserManagementBody(): React.JSX.Element {
       >
         <div className="flex flex-col gap-3">
           <p className="text-xs text-textMuted">
-            Daftar perangkat yang sedang login. Apabila kamu Cabut sesi maka akan otomatis keluar akun.
+            Daftar perangkat yang sedang login (diperbarui otomatis setiap {DEVICES_POLL_INTERVAL_MS / 1000} detik —
+            sesi yang sudah kedaluwarsa otomatis hilang dari daftar ini). Apabila kamu Cabut sesi, perangkat
+            tersebut langsung ditolak di request berikutnya dan otomatis keluar akun (dipaksa login ulang).
           </p>
           {renderDevicesBody()}
         </div>
