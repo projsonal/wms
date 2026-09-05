@@ -42,7 +42,7 @@ export function usePermissions(): UsePermissionsResult {
   const { data, isLoading, error } = useSWR(
     user && !isSuperAdmin ? ['permission-matrix', user.roleId] : null,
     () => rolesApi.getPermissionMatrix(user!.roleId),
-    { revalidateOnFocus: false, errorRetryCount: 3, errorRetryInterval: 1500 },
+    { revalidateOnFocus: true, errorRetryCount: 3, errorRetryInterval: 1500 },
   );
 
   const byModule: Record<string, PermissionMatrixItem> = {};

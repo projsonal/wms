@@ -41,7 +41,7 @@ const TOTAL_MODUL_TERDAFTAR = Object.values(PERMISSION_MODULES).reduce(
 
 function RecentAssetsCard(): React.JSX.Element {
   const { data: result, error } = useSWR('user-mgmt-recent-assets', () => assetsApi.list({ pageSize: 8 }), {
-    revalidateOnFocus: false,
+    revalidateOnFocus: true,
     shouldRetryOnError: false,
   });
 
@@ -98,7 +98,7 @@ function RecentAssetsCard(): React.JSX.Element {
 
 function AssetSummaryCard(): React.JSX.Element {
   const { data: summary, error } = useSWR('user-mgmt-asset-summary', () => assetsApi.summary(), {
-    revalidateOnFocus: false,
+    revalidateOnFocus: true,
     shouldRetryOnError: false,
   });
 

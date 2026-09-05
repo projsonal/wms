@@ -13,6 +13,18 @@ function isStatusCode(value: string): value is StatusCode {
 const REASON_MESSAGE: Record<string, string> = {
   modul:
     'Kamu tidak bisa mengakses modul ini karena tidak dapat izin dari Kepala Gudang. Hubungi Kepala Gudang atau Super Admin kalau kamu merasa ini keliru.',
+  'akun-tidak-terdaftar':
+    'Kamu tidak bisa mengakses halaman ini karena akun tersebut belum terdaftar di sistem. Silakan daftar akun terlebih dahulu.',
+};
+
+// Tombol aksi khusus per "reason" — dipakai buat kasus di mana tombol default
+// ("Kembali ke Halaman Utama" -> /login) tidak relevan, mis. akun yang belum
+// terdaftar sebaiknya diarahkan langsung ke halaman Daftar Akun.
+const REASON_ACTIONS: Record<string, { label: string; href: string; variant?: 'primary' | 'secondary' }[]> = {
+  'akun-tidak-terdaftar': [
+    { label: 'Daftar Akun', href: '/register', variant: 'primary' },
+    { label: 'Coba Masuk Lagi', href: '/login', variant: 'secondary' },
+  ],
 };
 
 export default async function StatusCodePage({
@@ -28,5 +40,6 @@ export default async function StatusCodePage({
     notFound();
   }
   const message = reason ? REASON_MESSAGE[reason] : undefined;
-  return <StatusScreen code={code} message={message} />;
+  const actions = reason ? REASON_ACTIONS[reason] : undefined;
+  return <StatusScreen code={code} message={message} actions={actions} />;
 }

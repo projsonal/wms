@@ -24,17 +24,17 @@ export function RekapDataContent(): React.JSX.Element {
   const { data: summary, error: summaryError, isLoading: summaryLoading } = useSWR(
     'rekap-data-summary',
     () => dashboardApi.summary(),
-    { revalidateOnFocus: false },
+    { revalidateOnFocus: true },
   );
   const { data: trendRaw, error: trendError } = useSWR(
     'rekap-data-trend',
     () => dashboardApi.trend(),
-    { revalidateOnFocus: false },
+    { revalidateOnFocus: true },
   );
   const { data: pengajuanSummary, error: pengajuanError } = useSWR(
     'rekap-data-pengajuan-summary',
     () => pengajuanApi.summary(),
-    { revalidateOnFocus: false },
+    { revalidateOnFocus: true },
   );
 
   const trend: TrendPoint[] =

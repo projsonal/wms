@@ -198,10 +198,6 @@ function HargaBeliField({ isEditing, stock, price, onPriceChange }: HargaBeliFie
     return (
       <div>
         <CurrencyField label="Harga Beli Awal (untuk Stok Awal)" value={price} onValueChange={onPriceChange} />
-        <p className="mt-1 text-xs text-textMuted">
-          Dipakai sebagai dasar nilai stok awal yang diisi di atas. Untuk stok berikutnya, harga
-          rata-rata akan diperbarui otomatis dari dokumen Barang Masuk.
-        </p>
       </div>
     );
   }
@@ -211,10 +207,6 @@ function HargaBeliField({ isEditing, stock, price, onPriceChange }: HargaBeliFie
         <p className="text-sm font-medium text-text">Harga Beli (rata-rata tertimbang)</p>
         <p className="mt-1.5 rounded-md border border-borderSoft bg-neutralBg px-4 py-2.5 text-sm text-text">
           {formatCurrency(price)}
-        </p>
-        <p className="mt-1 text-xs text-textMuted">
-          Diperbarui otomatis oleh sistem dari harga satuan di setiap dokumen Barang Masuk — tidak
-          diedit manual dari sini supaya perhitungan nilai stok tetap akurat.
         </p>
       </div>
     );
@@ -914,11 +906,29 @@ export function ItemsManagementContent(): React.JSX.Element {
           </>
         }
       >
-        <Input
-          label="Nama Barang"
-          value={form.name ?? ''}
-          onChange={(event) => setForm({ ...form, name: event.target.value })}
-        />
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="Nama Barang"
+            value={form.name ?? ''}
+            onChange={(event) => setForm({ ...form, name: event.target.value })}
+          />
+          {!editingId ? (
+            <Select
+              label="Gudang Tujuan Stok Awal"
+              value={form.warehouseId ?? ''}
+              onChange={(event) => setForm({ ...form, warehouseId: event.target.value })}
+              placeholder="Pilih gudang"
+              options={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
+            />
+          ) : (
+            <StokKoreksiGudangField
+              visible={(form.stock ?? 0) !== originalStock}
+              warehouseId={form.warehouseId ?? ''}
+              onWarehouseIdChange={(value) => setForm({ ...form, warehouseId: value })}
+              gudangOptions={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
+            />
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <div className="mb-1 flex items-center justify-between">
@@ -953,12 +963,7 @@ export function ItemsManagementContent(): React.JSX.Element {
               disabled={skuMode === 'otomatis' || isGeneratingSku}
               placeholder={skuMode === 'otomatis' ? 'Pilih kategori dulu untuk saran SKU' : 'mis. TEK-ONT-HUA-S-0001'}
             />
-            {skuMode === 'otomatis' ? (
-              <p className="mt-1 text-xs text-textMuted">
-                Format &quot;KATEGORI-TIPE-MEREK-UKURAN-nomor&quot; (mis. Teknologi + ONT + Huawei + berat
-                800gr → &quot;TEK-ONT-HUA-S-0007&quot;). 
-              </p>
-            ) : (
+            {skuMode === 'otomatis' ? null : (
               <>
                 {skuAvailability === 'checking' && (
                   <p className="mt-1 text-xs text-textMuted">Mengecek ketersediaan SKU...</p>
@@ -1000,11 +1005,6 @@ export function ItemsManagementContent(): React.JSX.Element {
               value={form.stock ?? 0}
               onValueChange={(value) => setForm({ ...form, stock: value })}
             />
-            <p className="mt-1 text-xs text-textMuted">
-              {editingId
-                ? 'Nilai ABSOLUT (menimpa stok saat ini) — cuma untuk koreksi manual (mis. hasil stock opname). Untuk transaksi normal, pakai Barang Masuk/Keluar supaya riwayatnya tercatat.'
-                : 'Isi kalau barang ini sudah punya stok fisik di gudang sebelum didaftarkan (mis. mendigitalisasi stok lama). Kosongkan/0 kalau stok akan ditambah lewat Barang Masuk seperti biasa.'}
-            </p>
           </div>
           <div>
             <NumberField
@@ -1012,10 +1012,6 @@ export function ItemsManagementContent(): React.JSX.Element {
               value={form.minStock ?? 0}
               onValueChange={(value) => setForm({ ...form, minStock: value })}
             />
-            <p className="mt-1 text-xs text-textMuted">
-              Ambang batas peringatan &quot;Stok Menipis&quot; — status barang otomatis berubah kalau
-              stok sekarang turun sampai atau di bawah angka ini.
-            </p>
           </div>
         </div>
         <HargaBeliField
@@ -1023,30 +1019,6 @@ export function ItemsManagementContent(): React.JSX.Element {
           stock={form.stock ?? 0}
           price={form.price ?? 0}
           onPriceChange={(value) => setForm({ ...form, price: value })}
-        />
-        {!editingId ? (
-          <div>
-            <Select
-              label="Gudang Tujuan Stok Awal"
-              value={form.warehouseId ?? ''}
-              onChange={(event) => setForm({ ...form, warehouseId: event.target.value })}
-              placeholder="Pilih gudang"
-              options={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
-            />
-            <p className="mt-1 text-xs text-textMuted">
-              {(form.stock ?? 0) > 0
-                ? 'Wajib dipilih karena Stok Awal di atas diisi — stok ini akan langsung tercatat di gudang yang dipilih.'
-                : 'Cuma perlu dipilih kalau Stok Awal di atas diisi. Kalau stok akan ditambah lewat Barang Masuk seperti biasa, boleh dikosongkan.'}
-            </p>
-          </div>
-        ) : null}
-        <StokKoreksiGudangField
-          visible={Boolean(editingId) && (form.stock ?? 0) !== originalStock}
-          originalStock={originalStock}
-          currentStock={form.stock ?? 0}
-          warehouseId={form.warehouseId ?? ''}
-          onWarehouseIdChange={(value) => setForm({ ...form, warehouseId: value })}
-          gudangOptions={(gudangList?.data ?? []).map((g) => ({ label: g.name, value: g.id }))}
         />
         <SelectWithCreate
           label="Satuan"
@@ -1096,10 +1068,6 @@ export function ItemsManagementContent(): React.JSX.Element {
               handleBeratChangeForSku(grams);
             }}
           />
-          <p className="mt-1 text-xs text-textMuted">
-            Contoh: 0.06 untuk 60 gram, 1.5 untuk 1,5 kg. Dipakai menampilkan berat di resi pengiriman,
-            dan menentukan komponen Ukuran (S/M/L) di SKU otomatis — S di bawah 1kg, M 1-5kg, L di atas 5kg.
-          </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Input
@@ -1170,8 +1138,6 @@ export function ItemsManagementContent(): React.JSX.Element {
 
 interface StokKoreksiGudangFieldProps {
   visible: boolean;
-  originalStock: number;
-  currentStock: number;
   warehouseId: string;
   onWarehouseIdChange: (value: string) => void;
   gudangOptions: { label: string; value: string }[];
@@ -1184,28 +1150,19 @@ interface StokKoreksiGudangFieldProps {
 // langsung tanpa jejak gudang, yang menyebabkan bug drift sebelumnya).
 function StokKoreksiGudangField({
   visible,
-  originalStock,
-  currentStock,
   warehouseId,
   onWarehouseIdChange,
   gudangOptions,
 }: StokKoreksiGudangFieldProps): React.JSX.Element | null {
   if (!visible) return null;
   return (
-    <div>
-      <Select
-        label="Gudang Tujuan Koreksi Stok"
-        value={warehouseId}
-        onChange={(event) => onWarehouseIdChange(event.target.value)}
-        placeholder="Pilih gudang"
-        options={gudangOptions}
-      />
-      <p className="mt-1 text-xs text-textMuted">
-        Wajib dipilih karena Stok di atas diubah dari {formatNumber(originalStock)} menjadi{' '}
-        {formatNumber(currentStock)} — selisihnya akan diterapkan ke stok gudang ini, lalu total stok barang
-        dihitung ulang otomatis (real-time) dari rincian per gudang.
-      </p>
-    </div>
+    <Select
+      label="Gudang Tujuan Koreksi Stok"
+      value={warehouseId}
+      onChange={(event) => onWarehouseIdChange(event.target.value)}
+      placeholder="Pilih gudang"
+      options={gudangOptions}
+    />
   );
 }
 

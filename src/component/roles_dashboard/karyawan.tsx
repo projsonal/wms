@@ -28,12 +28,12 @@ function useKaryawanDashboardData() {
   const { data: barangRusakResult, error: barangRusakError, isLoading: barangRusakLoading } = useSWR(
     'karyawan-barang-rusak',
     () => barangRusakApi.list({ pageSize: 50 }),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
+    { revalidateOnFocus: true, shouldRetryOnError: false },
   );
   const { data: barangRusakSummary, error: barangRusakSummaryError } = useSWR(
     'karyawan-barang-rusak-summary',
     () => barangRusakApi.summary(),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
+    { revalidateOnFocus: true, shouldRetryOnError: false },
   );
 
   const allMyLaporanRusak = (barangRusakResult?.data ?? []).filter(

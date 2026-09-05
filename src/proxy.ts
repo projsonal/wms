@@ -26,6 +26,17 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
+  // Akses ke root domain ("/") itu bukan "user mencoba masuk ke menu
+  // tertentu" — ini cuma titik masuk awal aplikasi. Jadi link tujuannya
+  // harus tetap bersih (`/login` polos), TANPA `?redirect=&reason=unauthorized`
+  // dan tanpa toast "tidak boleh diakses". Query param + toast itu HANYA
+  // muncul kalau user memang mencoba membuka menu/halaman lain secara
+  // langsung saat belum login (kasus di bawah).
+  if (pathname === '/') {
+    const target = hasSession ? '/dashboard' : '/login';
+    return NextResponse.redirect(new URL(target, request.url));
+  }
+
   if (!hasSession) {
     const loginUrl = new URL('/login', request.url);
 

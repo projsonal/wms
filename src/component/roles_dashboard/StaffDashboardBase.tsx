@@ -20,12 +20,12 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
   const { data: summaryRaw, error: summaryError } = useSWR(
     'dashboard-summary',
     () => dashboardApi.summary(),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
+    { revalidateOnFocus: true, shouldRetryOnError: false },
   );
   const { data: trendRaw, error: trendError } = useSWR(
     'dashboard-trend',
     () => dashboardApi.trend(),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
+    { revalidateOnFocus: true, shouldRetryOnError: false },
   );
 
   const stats: StatMetric[] | null =
@@ -52,7 +52,7 @@ export function StaffDashboardBase({ role }: StaffDashboardBaseProps): React.JSX
   } = useSWR(
     'dashboard-low-stock',
     () => itemsApi.list({ stok_menipis: 1, pageSize: 5 }),
-    { revalidateOnFocus: false, shouldRetryOnError: false },
+    { revalidateOnFocus: true, shouldRetryOnError: false },
   );
 
   return (

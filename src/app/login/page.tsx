@@ -102,6 +102,17 @@ function LoginWizard(): React.JSX.Element {
         return;
       }
 
+      // Backend menandai akun yang memang belum terdaftar (bukan sekadar
+      // salah password) lewat status 404 atau pesan eksplisit. Untuk kasus
+      // ini, jangan cuma tampilkan error kecil di form — arahkan ke halaman
+      // kode akses supaya user langsung diarahkan untuk mendaftar akun.
+      const isUnregisteredAccount =
+        error instanceof HttpError && (error.code === '404' || /tidak terdaftar|belum terdaftar|tidak ditemukan/i.test(message));
+      if (isUnregisteredAccount) {
+        router.push('/status/404?reason=akun-tidak-terdaftar');
+        return;
+      }
+
       setFormError(message);
 
       const nextAttempts = failedAttempts + 1;

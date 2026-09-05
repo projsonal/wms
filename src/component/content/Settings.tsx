@@ -835,7 +835,7 @@ function SystemTab(): React.JSX.Element {
   const [durationValue, setDurationValue] = useState(2);
   const [durationUnit, setDurationUnit] = useState<'minutes' | 'hours'>('hours');
   const [isSaving, setIsSaving] = useState(false);
-  const [autoSyncEnabled, setAutoSyncEnabledState] = useState(false);
+  const [autoSyncEnabled, setAutoSyncEnabledState] = useState(true);
 
   useEffect(() => {
 
@@ -847,7 +847,7 @@ function SystemTab(): React.JSX.Element {
     setAutoSyncEnabled(next);
     toast.success(
       next
-        ? 'Sinkronisasi otomatis diaktifkan — semua modul akan disegarkan tiap 1 menit.'
+        ? 'Sinkronisasi otomatis diaktifkan — semua modul akan disegarkan tiap 30 detik.'
         : 'Sinkronisasi otomatis dimatikan.',
     );
   }
@@ -994,7 +994,7 @@ function SystemTab(): React.JSX.Element {
       <h2 className="mb-2 text-base font-semibold text-text">Sistem</h2>
       <ToggleRow
         title="Sinkronisasi Otomatis"
-        description="Segarkan ulang data di semua modul yang sedang terbuka setiap 1 menit"
+        description="Segarkan ulang data di semua modul yang sedang terbuka setiap 30 detik (aktif secara default)"
         checked={autoSyncEnabled}
         onChange={handleToggleAutoSync}
       />

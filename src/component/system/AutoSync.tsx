@@ -4,13 +4,16 @@ import { useEffect, useRef } from 'react';
 import { useSWRConfig } from 'swr';
 
 const PREF_KEY = 'wms_auto_sync_enabled';
-const SYNC_INTERVAL_MS = 60 * 1000;
+const SYNC_INTERVAL_MS = 30 * 1000;
 
 const PREF_CHANGED_EVENT = 'wms:auto-sync-pref-changed';
 
+// Sinkronisasi otomatis AKTIF SECARA DEFAULT — user tidak perlu menyalakannya
+// dulu lewat Pengaturan supaya data ter-update sendiri. Preferensi di
+// localStorage cuma dipakai kalau user secara eksplisit MEMATIKANNYA ('0').
 export function isAutoSyncEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(PREF_KEY) === '1';
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(PREF_KEY) !== '0';
 }
 
 export function setAutoSyncEnabled(enabled: boolean): void {
